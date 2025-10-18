@@ -8,6 +8,7 @@ import { StreamController } from './streamController';
 import { UserVestingController } from './userVestingController';
 import { TreasuryController } from './treasuryController';
 import { AdminLogsController } from './adminLogsController';
+import { CronController } from './cronController';
 
 const router = express.Router();
 const snapshotController = new SnapshotController();
@@ -19,6 +20,7 @@ const streamController = new StreamController();
 const userVestingController = new UserVestingController();
 const treasuryController = new TreasuryController();
 const adminLogsController = new AdminLogsController();
+const cronController = new CronController();
 
 // ============================================================================
 // ADMIN ROUTES - Protected by frontend page-level auth
@@ -118,5 +120,12 @@ router.get('/user/vesting/summary', (req, res) => userVestingController.getVesti
 router.post('/user/vesting/claim', (req, res) => userVestingController.claimVesting(req, res));
 router.post('/user/vesting/complete-claim', (req, res) => userVestingController.completeClaimWithFee(req, res));
 router.get('/user/vesting/claim-history', (req, res) => userVestingController.getClaimHistory(req, res));
+
+// ============================================================================
+// CRON ROUTES - For external cron services (secured with CRON_SECRET)
+// ============================================================================
+router.get('/cron/health', (req, res) => cronController.healthCheck(req, res));
+router.post('/cron/snapshot', (req, res) => cronController.triggerSnapshotCheck(req, res));
+router.post('/cron/sync-dynamic', (req, res) => cronController.triggerDynamicSync(req, res));
 
 export default router;
