@@ -9,10 +9,10 @@ export class PriceService {
   private pythClient: PythHttpClient;
   
   // Pyth price feed IDs
-  private readonly SOL_USD_FEED = 'H6ARHf6YXhGYeQfUzQNGk6rDNnLBQKrenN712K4AQJEG'; // Devnet
-  // For mainnet, use: 'Gnt27xtC473ZT2Mw5u8wZ68Z3gULkSTb5DuxJy7eJotD'
+  private readonly SOL_USD_FEED = 'Gnt27xtC473ZT2Mw5u8wZ68Z3gULkSTb5DuxJy7eJotD'; // Mainnet
+  // For devnet, use: 'H6ARHf6YXhGYeQfUzQNGk6rDNnLBQKrenN712K4AQJEG'
 
-  constructor(connection: Connection, cluster: 'devnet' | 'mainnet-beta' = 'devnet') {
+  constructor(connection: Connection, cluster: 'devnet' | 'mainnet-beta' = 'mainnet-beta') {
     this.connection = connection;
     const pythProgramKey = getPythProgramKeyForCluster(cluster);
     this.pythClient = new PythHttpClient(connection, pythProgramKey);

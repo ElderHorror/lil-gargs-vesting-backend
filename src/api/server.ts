@@ -3,7 +3,7 @@ import cors from 'cors';
 import routes from './routes';
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = parseInt(process.env.PORT || '3001', 10);
 
 // Middleware
 app.use(cors());
@@ -18,7 +18,7 @@ app.get('/health', (req, res) => {
 });
 
 // Start server
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Vesting API server running on port ${PORT}`);
 });
 

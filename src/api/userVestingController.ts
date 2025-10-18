@@ -404,7 +404,7 @@ export class UserVestingController {
       if (stream.nft_requirements && Array.isArray(stream.nft_requirements) && stream.nft_requirements.length > 0) {
         try {
           const { HeliusNFTService } = await import('../services/heliusNFTService');
-          const helius = new HeliusNFTService(config.heliusApiKey, 'devnet');
+          const helius = new HeliusNFTService(config.heliusApiKey, 'mainnet-beta');
           
           console.log('🔍 Validating NFT ownership for wallet:', userWallet);
           console.log('📋 Pool rules:', JSON.stringify(stream.nft_requirements, null, 2));
@@ -520,7 +520,7 @@ export class UserVestingController {
 
       // Get real-time SOL/USD price from Pyth oracle
       const { PriceService } = await import('../services/priceService');
-      const priceService = new PriceService(this.connection, 'devnet');
+      const priceService = new PriceService(this.connection, 'mainnet-beta');
       const { solAmount: feeInSol, solPrice: solPriceUsd } = await priceService.calculateSolFee(claimFeeUsd);
       const feeInLamports = Math.floor(feeInSol * LAMPORTS_PER_SOL);
       
@@ -876,7 +876,7 @@ export class UserVestingController {
       
       // Get real-time SOL price
       const { PriceService } = await import('../services/priceService');
-      const priceService = new PriceService(this.connection, 'devnet');
+      const priceService = new PriceService(this.connection, 'mainnet-beta');
       const { solAmount: feeInSol } = await priceService.calculateSolFee(claimFeeUsd);
 
       // Record claim in database (store in base units for consistency)
