@@ -188,8 +188,13 @@ export class UserVestingController {
       const totalAllocation = vesting.token_amount;
       const now = Math.floor(Date.now() / 1000);
       const startTime = stream.start_time ? Math.floor(new Date(stream.start_time).getTime() / 1000) : now;
-      const endTime = stream.end_time ? Math.floor(new Date(stream.end_time).getTime() / 1000) : now + (stream.vesting_duration_days * 24 * 60 * 60);
-      const cliffTime = startTime + (stream.cliff_duration_days * 24 * 60 * 60);
+      
+      // Use seconds if available, otherwise fall back to days
+      const vestingDurationSeconds = stream.vesting_duration_seconds || (stream.vesting_duration_days * 86400);
+      const cliffDurationSeconds = stream.cliff_duration_seconds || (stream.cliff_duration_days * 86400);
+      
+      const endTime = stream.end_time ? Math.floor(new Date(stream.end_time).getTime() / 1000) : now + vestingDurationSeconds;
+      const cliffTime = startTime + cliffDurationSeconds;
 
       // Calculate vested amount
       let vestedAmount = 0;
@@ -493,8 +498,13 @@ export class UserVestingController {
       const totalAllocation = vesting.token_amount;
       const now = Math.floor(Date.now() / 1000);
       const startTime = stream.start_time ? Math.floor(new Date(stream.start_time).getTime() / 1000) : now;
-      const endTime = stream.end_time ? Math.floor(new Date(stream.end_time).getTime() / 1000) : now + (stream.vesting_duration_days * 24 * 60 * 60);
-      const cliffTime = startTime + (stream.cliff_duration_days * 24 * 60 * 60);
+      
+      // Use seconds if available, otherwise fall back to days
+      const vestingDurationSeconds = stream.vesting_duration_seconds || (stream.vesting_duration_days * 86400);
+      const cliffDurationSeconds = stream.cliff_duration_seconds || (stream.cliff_duration_days * 86400);
+      
+      const endTime = stream.end_time ? Math.floor(new Date(stream.end_time).getTime() / 1000) : now + vestingDurationSeconds;
+      const cliffTime = startTime + cliffDurationSeconds;
 
       // Calculate vested amount
       let vestedAmount = 0;
@@ -601,14 +611,27 @@ export class UserVestingController {
         const treasuryTokenAccountInfo = await getAccount(this.connection, treasuryTokenAccount);
         const treasuryBalance = Number(treasuryTokenAccountInfo.amount);
         
+        console.log('[CLAIM] Treasury check:', {
+          treasuryTokenAccount: treasuryTokenAccount.toBase58(),
+          treasuryBalance,
+          claimableAmount,
+          tokenMint: tokenMint.toBase58(),
+        });
+        
         if (treasuryBalance < claimableAmount) {
           return res.status(400).json({ 
-            error: `Insufficient tokens in treasury wallet. Available: ${treasuryBalance}, Required: ${claimableAmount}` 
+            error: `Insufficient tokens in treasury wallet. Available: ${treasuryBalance / 1e9}, Required: ${claimableAmount / 1e9}` 
           });
         }
       } catch (err) {
+        console.error('[CLAIM] Treasury token account error:', err);
+        console.error('[CLAIM] Details:', {
+          treasuryWallet: treasuryKeypair.publicKey.toBase58(),
+          treasuryTokenAccount: treasuryTokenAccount.toBase58(),
+          tokenMint: tokenMint.toBase58(),
+        });
         return res.status(500).json({ 
-          error: 'Treasury token account not found or error checking balance' 
+          error: `Treasury token account not found. Treasury: ${treasuryKeypair.publicKey.toBase58()}, Token: ${tokenMint.toBase58()}. Error: ${err instanceof Error ? err.message : 'Unknown'}` 
         });
       }
 
@@ -716,8 +739,13 @@ export class UserVestingController {
       const totalAllocation = vesting.token_amount;
       const now = Math.floor(Date.now() / 1000);
       const startTime = stream.start_time ? Math.floor(new Date(stream.start_time).getTime() / 1000) : now;
-      const endTime = stream.end_time ? Math.floor(new Date(stream.end_time).getTime() / 1000) : now + (stream.vesting_duration_days * 24 * 60 * 60);
-      const cliffTime = startTime + (stream.cliff_duration_days * 24 * 60 * 60);
+      
+      // Use seconds if available, otherwise fall back to days
+      const vestingDurationSeconds = stream.vesting_duration_seconds || (stream.vesting_duration_days * 86400);
+      const cliffDurationSeconds = stream.cliff_duration_seconds || (stream.cliff_duration_days * 86400);
+      
+      const endTime = stream.end_time ? Math.floor(new Date(stream.end_time).getTime() / 1000) : now + vestingDurationSeconds;
+      const cliffTime = startTime + cliffDurationSeconds;
 
       // Calculate vested amount
       let vestedAmount = 0;

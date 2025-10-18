@@ -31,8 +31,10 @@
     "allocations:manual": "ts-node scripts/addManualAllocations.ts",
     "test:create-pool": "ts-node scripts/createTestPool.ts",
     "test:delete-pool": "ts-node scripts/deleteTestPool.ts",
+    "test:delete-all": "ts-node scripts/deleteAllTestPools.ts",
     "test:snapshot": "ts-node scripts/testSnapshot.ts",
-    "test:create-snapshot-pool": "ts-node scripts/createSnapshotTestPool.ts"
+    "test:create-snapshot-pool": "ts-node scripts/createSnapshotTestPool.ts",
+    "test:create-cliff-pool": "ts-node scripts/createCliffTestPool.ts"
   },
   "dependencies": {
     "@chakra-ui/icons": "^2.2.4",
