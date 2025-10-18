@@ -295,8 +295,26 @@ process.on('SIGTERM', () => {
   process.exit(0);
 });
 
-// Start scheduler
-runScheduler().catch((error) => {
-  console.error('[SCHEDULER] Fatal error:', error);
-  process.exit(1);
-});
+// Check if running in cron mode (--once flag)
+const isOnceMode = process.argv.includes('--once');
+
+if (isOnceMode) {
+  // Run once and exit (for cron jobs)
+  console.log('[SCHEDULER] Running in cron mode (once)');
+  checkPendingSnapshots()
+    .then(() => {
+      console.log('[SCHEDULER] Cron job completed');
+      process.exit(0);
+    })
+    .catch((error) => {
+      console.error('[SCHEDULER] Cron job failed:', error);
+      process.exit(1);
+    });
+} else {
+  // Run as daemon (continuous)
+  console.log('[SCHEDULER] Running in daemon mode (continuous)');
+  runScheduler().catch((error) => {
+    console.error('[SCHEDULER] Fatal error:', error);
+    process.exit(1);
+  });
+}

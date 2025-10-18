@@ -34,14 +34,14 @@ services:
       - key: FEE_WALLET
         sync: false
 
-  # Snapshot Scheduler (Background Worker)
-  - type: worker
-    name: lil-gargs-snapshot-scheduler
+  # Snapshot Scheduler (Cron Job - runs hourly)
+  - type: cron
+    name: lil-gargs-snapshot-cron
     env: node
     region: oregon
-    plan: starter
-    buildCommand: npm install
-    startCommand: npm run snapshot:scheduler
+    schedule: "0 * * * *"  # Every hour at minute 0
+    buildCommand: npm install && npm run build
+    startCommand: node dist/snapshotScheduler.js --once
     envVars:
       - key: NODE_ENV
         value: production
@@ -52,16 +52,24 @@ services:
       - key: SOLANA_RPC_ENDPOINT
         value: https://api.mainnet-beta.solana.com
       - key: CUSTOM_TOKEN_MINT
+        sync: false
+      - key: TREASURY_PRIVATE_KEY
+        sync: false
+      - key: ADMIN_PRIVATE_KEY
+        sync: false
+      - key: HELIUS_API_KEY
+        sync: false
+      - key: NFT_COLLECTION_ADDRESS
         sync: false
 
-  # Dynamic Pool Sync Daemon (Background Worker)
-  - type: worker
-    name: lil-gargs-dynamic-sync
+  # Dynamic Pool Sync (Cron Job - runs daily at 2 AM)
+  - type: cron
+    name: lil-gargs-dynamic-sync-cron
     env: node
     region: oregon
-    plan: starter
-    buildCommand: npm install
-    startCommand: npm run sync:daemon:pool
+    schedule: "0 2 * * *"  # Daily at 2 AM UTC
+    buildCommand: npm install && npm run build
+    startCommand: node dist/utils/syncDynamicPool.js
     envVars:
       - key: NODE_ENV
         value: production
@@ -72,4 +80,12 @@ services:
       - key: SOLANA_RPC_ENDPOINT
         value: https://api.mainnet-beta.solana.com
       - key: CUSTOM_TOKEN_MINT
+        sync: false
+      - key: TREASURY_PRIVATE_KEY
+        sync: false
+      - key: ADMIN_PRIVATE_KEY
+        sync: false
+      - key: HELIUS_API_KEY
+        sync: false
+      - key: NFT_COLLECTION_ADDRESS
         sync: false
