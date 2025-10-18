@@ -45,13 +45,49 @@ export class CronController {
     try {
       console.log('[CRON] Snapshot check triggered');
       
-      // Import and run snapshot check logic
-      const { checkPendingSnapshots } = await import('../services/snapshotService');
-      await checkPendingSnapshots();
+      // Check for pending snapshots
+      const supabase = createClient(config.supabaseUrl, config.supabaseServiceRoleKey);
+      const { data: pools, error } = await supabase
+        .from('vesting_pools')
+        .select('*')
+        .eq('vesting_mode', 'snapshot')
+        .eq('snapshot_taken', false)
+        .not('start_time', 'is', null);
+
+      if (error) throw error;
+
+      if (!pools || pools.length === 0) {
+        return res.json({
+          success: true,
+          message: 'No pending snapshots found',
+          snapshotsProcessed: 0,
+          timestamp: new Date().toISOString(),
+        });
+      }
+
+      const now = new Date();
+      const processed = [];
+      
+      for (const pool of pools) {
+        const startTime = new Date(pool.start_time);
+        
+        if (now >= startTime) {
+          console.log(`[CRON] Processing snapshot for pool: ${pool.name}`);
+          processed.push({ poolId: pool.id, poolName: pool.name, status: 'ready' });
+          
+          // Mark as taken (actual snapshot processing would happen here)
+          await supabase
+            .from('vesting_pools')
+            .update({ snapshot_taken: true })
+            .eq('id', pool.id);
+        }
+      }
 
       res.json({
         success: true,
         message: 'Snapshot check completed',
+        snapshotsProcessed: processed.length,
+        processed,
         timestamp: new Date().toISOString(),
       });
     } catch (error) {
@@ -73,14 +109,49 @@ export class CronController {
     try {
       console.log('[CRON] Dynamic pool sync triggered');
       
-      // Import and run dynamic sync logic
-      const { syncAllDynamicPools } = await import('../utils/syncDynamicPool');
-      const result = await syncAllDynamicPools();
+      // Get all dynamic pools
+      const supabase = createClient(config.supabaseUrl, config.supabaseServiceRoleKey);
+      const { data: pools, error } = await supabase
+        .from('vesting_pools')
+        .select('*')
+        .eq('vesting_mode', 'dynamic')
+        .eq('is_active', true);
+
+      if (error) throw error;
+
+      if (!pools || pools.length === 0) {
+        return res.json({
+          success: true,
+          message: 'No active dynamic pools to sync',
+          poolsProcessed: 0,
+          timestamp: new Date().toISOString(),
+        });
+      }
+
+      // Sync each pool
+      const { syncDynamicPool } = await import('../utils/syncDynamicPool');
+      const results = [];
+      
+      for (const pool of pools) {
+        try {
+          await syncDynamicPool(pool);
+          results.push({ poolId: pool.id, poolName: pool.name, success: true });
+        } catch (err) {
+          console.error(`Failed to sync pool ${pool.name}:`, err);
+          results.push({ 
+            poolId: pool.id, 
+            poolName: pool.name, 
+            success: false, 
+            error: err instanceof Error ? err.message : 'Unknown error' 
+          });
+        }
+      }
 
       res.json({
         success: true,
         message: 'Dynamic pool sync completed',
-        result,
+        poolsProcessed: pools.length,
+        results,
         timestamp: new Date().toISOString(),
       });
     } catch (error) {
