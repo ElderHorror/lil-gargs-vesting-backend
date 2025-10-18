@@ -56,9 +56,13 @@ export class TreasuryController {
       );
 
       let treasuryBalance = 0;
+      const TOKEN_DECIMALS = 9;
+      const TOKEN_DIVISOR = Math.pow(10, TOKEN_DECIMALS);
+      
       try {
         const accountInfo = await getAccount(this.connection, treasuryTokenAccount);
-        treasuryBalance = Number(accountInfo.amount);
+        // Convert from base units (lamports) to human-readable tokens
+        treasuryBalance = Number(accountInfo.amount) / TOKEN_DIVISOR;
       } catch (err) {
         // Token account doesn't exist yet
         treasuryBalance = 0;

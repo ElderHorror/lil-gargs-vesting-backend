@@ -94,7 +94,15 @@ async function takeSnapshot(pool: SnapshotPool): Promise<void> {
     const requirements = pool.nft_requirements || [];
     
     if (requirements.length === 0) {
-      console.error('[SNAPSHOT] No NFT requirements defined for this pool');
+      console.log('[SNAPSHOT] ⚠️ No NFT requirements defined for this pool - skipping snapshot');
+      console.log('[SNAPSHOT] 💡 For pools without NFT requirements, add users manually to the vestings table');
+      
+      // Mark snapshot as taken so it doesn't keep trying
+      await supabase
+        .from('vesting_streams')
+        .update({ snapshot_taken: true })
+        .eq('id', pool.id);
+      
       return;
     }
     

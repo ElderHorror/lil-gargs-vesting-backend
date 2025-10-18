@@ -27,7 +27,9 @@
     "test:manual": "ts-node tests/manual-test.ts",
     "db:clear": "ts-node src/clearDatabase.ts",
     "test:distribution": "ts-node tests/test-equal-distribution.ts",
-    "recalculate": "ts-node src/recalculateAllocations.ts"
+    "recalculate": "ts-node src/recalculateAllocations.ts",
+    "allocations:manual": "ts-node scripts/addManualAllocations.ts",
+    "test:create-pool": "ts-node scripts/createTestPool.ts"
   },
   "dependencies": {
     "@chakra-ui/icons": "^2.2.4",

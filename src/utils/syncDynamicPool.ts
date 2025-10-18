@@ -22,8 +22,8 @@ export async function syncDynamicPool(pool: any) {
   const rules = pool.nft_requirements || [];
   
   if (!rules || rules.length === 0) {
-    console.log('⚠️ No rules found for this pool');
-    console.log('Pool nft_requirements:', pool.nft_requirements);
+    console.log('⚠️ No NFT rules found for this pool - skipping dynamic sync');
+    console.log('💡 For pools without NFT requirements, add users manually to the vestings table');
     return;
   }
   
