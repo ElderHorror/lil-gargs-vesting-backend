@@ -17,8 +17,8 @@ services:
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
-      - key: SOLANA_RPC_ENDPOINT
-        value: https://api.mainnet-beta.solana.com
+      - key: HELIUS_API_KEY
+        sync: false
       - key: CUSTOM_TOKEN_MINT
         sync: false
       - key: TREASURY_PRIVATE_KEY
@@ -27,8 +27,6 @@ services:
         value: "10"
       - key: ALLOWED_ORIGINS
         value: https://your-frontend-domain.com
-      - key: HELIUS_API_KEY
-        sync: false
       - key: NFT_COLLECTION_ADDRESS
         sync: false
       - key: FEE_WALLET

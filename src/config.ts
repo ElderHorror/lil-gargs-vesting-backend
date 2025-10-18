@@ -4,7 +4,9 @@ import { Connection, PublicKey } from '@solana/web3.js';
 dotenv.config();
 
 export const config = {
-  rpcEndpoint: process.env.RPC_ENDPOINT || process.env.SOLANA_RPC_ENDPOINT || 'https://api.mainnet-beta.solana.com',
+  rpcEndpoint: process.env.HELIUS_API_KEY 
+    ? `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`
+    : process.env.RPC_ENDPOINT || process.env.SOLANA_RPC_ENDPOINT || 'https://api.mainnet-beta.solana.com',
   treasuryPrivateKey: process.env.TREASURY_PRIVATE_KEY || '',
   adminPrivateKey: process.env.ADMIN_PRIVATE_KEY || process.env.TREASURY_PRIVATE_KEY || '',
   feeWallet: process.env.FEE_WALLET ? new PublicKey(process.env.FEE_WALLET) : undefined,
