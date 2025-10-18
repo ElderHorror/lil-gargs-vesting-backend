@@ -218,6 +218,10 @@ export class UserVestingController {
       // Calculate user's share percentage
       const sharePercentage = vesting.share_percentage || ((totalAllocation / poolTotal) * 100);
 
+      // Check if claims are globally enabled
+      const dbConfig = await this.dbService.getConfig();
+      const claimsEnabled = dbConfig?.enable_claims !== false;
+
       res.json({
         success: true,
         data: {
@@ -245,6 +249,7 @@ export class UserVestingController {
           nftCount: vesting.nft_count,
           tier: vesting.tier || 0,
           eligible: vesting.is_active && !vesting.is_cancelled,
+          claimsEnabled, // Add this flag so frontend knows if claims are disabled
           streamflow: {
             deployed: !!stream.streamflow_stream_id,
             streamId: stream.streamflow_stream_id || null,
@@ -342,6 +347,14 @@ export class UserVestingController {
    */
   async claimVesting(req: Request, res: Response) {
     try {
+      // Check if claims are globally enabled
+      const dbConfig = await this.dbService.getConfig();
+      if (dbConfig && dbConfig.enable_claims === false) {
+        return res.status(403).json({ 
+          error: 'Claims are currently disabled by the administrator. Please try again later.' 
+        });
+      }
+
       const { userWallet, poolId } = req.body;
 
       if (!userWallet) {
@@ -464,8 +477,7 @@ export class UserVestingController {
         }
       }
 
-      // Get claim fee from config
-      const dbConfig = await this.dbService.getConfig();
+      // Get claim fee from config (reuse dbConfig from earlier)
       const claimFeeUsd = dbConfig?.claim_fee_usd || 10.0;
 
       // Calculate claimable amount (SAME LOGIC AS SUMMARY ENDPOINT)

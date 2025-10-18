@@ -1,9 +1,18 @@
 import express from 'express';
 import cors from 'cors';
 import routes from './routes';
+import { requestLogger } from '../middleware/requestLogger';
+import { securityHeaders } from '../middleware/securityHeaders';
+import { apiRateLimiter } from '../middleware/rateLimiter';
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '3001', 10);
+
+// Security headers (apply first)
+app.use(securityHeaders);
+
+// Request logging
+app.use(requestLogger);
 
 // CORS Configuration
 const allowedOrigins = process.env.ALLOWED_ORIGINS 
@@ -28,6 +37,9 @@ app.use(cors({
 }));
 
 app.use(express.json());
+
+// Global rate limiting (100 requests per minute per IP)
+app.use('/api', apiRateLimiter);
 
 // Routes
 app.use('/api', routes);

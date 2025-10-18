@@ -9,6 +9,7 @@ import { UserVestingController } from './userVestingController';
 import { TreasuryController } from './treasuryController';
 import { AdminLogsController } from './adminLogsController';
 import { CronController } from './cronController';
+import { adminRateLimiter, strictRateLimiter } from '../middleware/rateLimiter';
 
 const router = express.Router();
 const snapshotController = new SnapshotController();
@@ -34,17 +35,17 @@ router.post('/snapshot/calculate-summary', (req, res) => snapshotController.calc
 router.post('/snapshot/process', (req, res) => snapshotController.processSnapshot(req, res));
 router.post('/snapshot/commit', (req, res) => snapshotController.commitSnapshot(req, res));
 
-// Pool endpoints
-router.post('/pools', (req, res) => poolController.createPool(req, res));
+// Pool endpoints (with admin rate limiting on write operations)
+router.post('/pools', adminRateLimiter, (req, res) => poolController.createPool(req, res));
 router.get('/pools', (req, res) => poolController.listPools(req, res));
 router.get('/pools/:id', (req, res) => poolController.getPoolDetails(req, res));
-router.delete('/pools/:id', (req, res) => poolController.cancelPool(req, res));
-router.put('/pools/:id/rules', (req, res) => poolController.updatePoolRule(req, res));
-router.post('/pools/:id/rules', (req, res) => poolController.addRule(req, res));
-router.post('/pools/:id/sync', (req, res) => poolController.syncPool(req, res));
+router.delete('/pools/:id', adminRateLimiter, (req, res) => poolController.cancelPool(req, res));
+router.put('/pools/:id/rules', adminRateLimiter, (req, res) => poolController.updatePoolRule(req, res));
+router.post('/pools/:id/rules', adminRateLimiter, (req, res) => poolController.addRule(req, res));
+router.post('/pools/:id/sync', adminRateLimiter, (req, res) => poolController.syncPool(req, res));
 router.get('/pools/:id/streamflow-status', (req, res) => poolController.getStreamflowStatus(req, res));
-router.post('/pools/:id/deploy-streamflow', (req, res) => poolController.deployToStreamflow(req, res));
-router.post('/pools/:id/topup', (req, res) => poolController.topupPool(req, res));
+router.post('/pools/:id/deploy-streamflow', strictRateLimiter, (req, res) => poolController.deployToStreamflow(req, res));
+router.post('/pools/:id/topup', strictRateLimiter, (req, res) => poolController.topupPool(req, res));
 router.get('/pools/:id/activity', (req, res) => poolController.getPoolActivity(req, res));
 router.get('/pools/:id/users/:wallet', (req, res) => poolController.getUserStatus(req, res));
 
