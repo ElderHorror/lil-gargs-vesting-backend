@@ -50,8 +50,15 @@ export class UserVestingController {
         return res.json({ success: true, vestings: [] });
       }
 
+      // Filter out pools that haven't started yet
+      const now = new Date();
+      const startedVestings = vestings.filter((v: any) => {
+        const startTime = new Date(v.vesting_streams.start_time);
+        return startTime <= now;
+      });
+
       // Return simplified list
-      const vestingList = vestings.map((v: any) => ({
+      const vestingList = startedVestings.map((v: any) => ({
         id: v.id,
         poolId: v.vesting_stream_id,
         poolName: v.vesting_streams.name,

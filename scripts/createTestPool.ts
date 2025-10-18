@@ -27,8 +27,9 @@ async function createTestPool() {
   const POOL_NAME = 'Test Pool - ' + new Date().toISOString().split('T')[0];
   const TOTAL_TOKENS = 100; // Total pool size (you have 500 GARG available)
   const ALLOCATION_AMOUNT = 50; // Amount allocated to test wallet
-  const VESTING_DAYS = 30; // 30 day vesting
+  const VESTING_DAYS = 1; // 1 day vesting (for immediate testing, tokens unlock over 24 hours)
   const CLIFF_DAYS = 0; // No cliff for testing
+  const START_IN_PAST = true; // Start vesting in the past so tokens are already unlocked
   
   // ============================================================================
   // END CONFIGURATION
@@ -55,8 +56,11 @@ async function createTestPool() {
     // Step 1: Create vesting pool
     console.log('📝 Step 1: Creating vesting pool...');
     
-    const startTime = new Date();
-    const endTime = new Date(Date.now() + VESTING_DAYS * 24 * 60 * 60 * 1000);
+    // If START_IN_PAST is true, start vesting 2 days ago so tokens are already unlocked
+    const startTime = START_IN_PAST 
+      ? new Date(Date.now() - 2 * 24 * 60 * 60 * 1000) // 2 days ago
+      : new Date();
+    const endTime = new Date(startTime.getTime() + VESTING_DAYS * 24 * 60 * 60 * 1000);
 
     const { data: pool, error: poolError } = await supabase
       .from('vesting_streams')
