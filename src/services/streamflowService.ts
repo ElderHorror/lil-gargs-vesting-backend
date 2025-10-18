@@ -16,7 +16,7 @@ export class StreamflowService {
     this.client = new GenericStreamClient<IChain.Solana>({
       chain: IChain.Solana,
       clusterUrl: config.rpcEndpoint,
-      cluster: ICluster.Devnet, // Change to Mainnet when ready
+      cluster: ICluster.Mainnet,
       commitment: 'confirmed',
     });
   }

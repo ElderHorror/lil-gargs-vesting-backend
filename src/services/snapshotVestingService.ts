@@ -58,7 +58,7 @@ export class SnapshotVestingService {
       // Check eligibility for each using Helius
       console.log('Checking eligibility...');
       const eligibleUsers: Array<{ wallet: string; nftCount: number; tier: number }> = [];
-      const helius = new HeliusNFTService(config.heliusApiKey, 'devnet');
+      const helius = new HeliusNFTService(config.heliusApiKey, 'mainnet-beta');
 
       for (const holder of holders) {
         try {
@@ -252,7 +252,7 @@ export class SnapshotVestingService {
       // Check eligibility for each wallet using Helius
       console.log('Checking eligibility...');
       const eligibleUsers: Array<{ wallet: string; nftCount: number; tier: number }> = [];
-      const helius = new HeliusNFTService(config.heliusApiKey, 'devnet');
+      const helius = new HeliusNFTService(config.heliusApiKey, 'mainnet-beta');
 
       for (const wallet of wallets) {
         try {

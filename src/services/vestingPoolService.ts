@@ -27,7 +27,7 @@ export class VestingPoolService {
     connection: Connection,
     feeWallet: PublicKey,
     claimFeeSOL: number,
-    cluster: ICluster = ICluster.Devnet
+    cluster: ICluster = ICluster.Mainnet
   ) {
     this.connection = connection;
     this.streamClient = new GenericStreamClient<IChain.Solana>({

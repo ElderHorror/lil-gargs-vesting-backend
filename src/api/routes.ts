@@ -59,7 +59,7 @@ router.get('/price/sol', async (req, res) => {
     const { PriceService } = await import('../services/priceService');
     const { getConnection } = await import('../config');
     const connection = getConnection();
-    const priceService = new PriceService(connection, 'devnet');
+    const priceService = new PriceService(connection, 'mainnet-beta');
     const solPrice = await priceService.getSolPrice();
     
     res.json({

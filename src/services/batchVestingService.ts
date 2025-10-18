@@ -36,7 +36,7 @@ export class BatchVestingService {
 
   constructor(
     connection: Connection,
-    cluster: ICluster = ICluster.Devnet
+    cluster: ICluster = ICluster.Mainnet
   ) {
     this.connection = connection;
     this.streamClient = new GenericStreamClient<IChain.Solana>({

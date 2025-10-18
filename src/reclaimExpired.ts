@@ -54,7 +54,7 @@ async function main() {
   const streamClient = new GenericStreamClient<IChain.Solana>({
     chain: IChain.Solana,
     clusterUrl: connection.rpcEndpoint,
-    cluster: ICluster.Devnet,
+    cluster: ICluster.Mainnet,
     commitment: 'confirmed',
   });
 

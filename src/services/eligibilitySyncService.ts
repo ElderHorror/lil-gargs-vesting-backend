@@ -27,7 +27,7 @@ export class EligibilitySyncService {
     vestingService: VestingService,
     modeService: VestingModeService,
     nftThreshold: number = 20,
-    cluster: ICluster = ICluster.Devnet,
+    cluster: ICluster = ICluster.Mainnet,
     nftCollectionAddress?: PublicKey
   ) {
     this.connection = connection;

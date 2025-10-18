@@ -23,7 +23,7 @@ export class VestingService {
     connection: Connection,
     feeWallet: PublicKey,
     claimFeeSOL: number,
-    cluster: ICluster = ICluster.Devnet,
+    cluster: ICluster = ICluster.Mainnet,
     nftCollectionAddress?: PublicKey
   ) {
     this.connection = connection;

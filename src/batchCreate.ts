@@ -27,7 +27,7 @@ async function main() {
   // Initialize services
   const batchService = new BatchVestingService(
     connection,
-    ICluster.Devnet
+    ICluster.Mainnet
   );
 
   const nftChecker = new NFTChecker(connection, config.nftCollectionAddress);

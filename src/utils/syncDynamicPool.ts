@@ -50,7 +50,7 @@ export async function syncDynamicPool(pool: any) {
       }
       
       // Get NFT holders using Helius
-      const heliusService = new HeliusNFTService(config.heliusApiKey, 'devnet');
+      const heliusService = new HeliusNFTService(config.heliusApiKey, 'mainnet-beta');
       const holders = await heliusService.getAllHolders(nftContract);
       
       console.log(`  Found ${holders.length} total holders`);

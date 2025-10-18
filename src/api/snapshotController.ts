@@ -17,7 +17,7 @@ export class SnapshotController {
   private dbService: SupabaseService;
 
   constructor() {
-    this.heliusService = new HeliusNFTService(config.heliusApiKey, 'devnet');
+    this.heliusService = new HeliusNFTService(config.heliusApiKey, 'mainnet-beta');
     this.snapshotConfigService = new SnapshotConfigService(this.heliusService);
     const supabaseClient = getSupabaseClient();
     this.dbService = new SupabaseService(supabaseClient);
