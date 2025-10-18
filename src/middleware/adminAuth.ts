@@ -1,14 +1,11 @@
 import { Request, Response, NextFunction } from 'express';
-import { createClient } from '@supabase/supabase-js';
-import { SupabaseService } from '../services/supabaseService';
-import { config } from '../config';
 
 /**
  * Admin Authentication Middleware
  * Verifies that the request comes from an authorized admin wallet
- * Frontend should be protected - this just validates the wallet address
+ * Admin wallets are configured via ADMIN_WALLETS environment variable
  */
-export async function requireAdmin(req: Request, res: Response, next: NextFunction) {
+export function requireAdmin(req: Request, res: Response, next: NextFunction) {
   try {
     // Get admin wallet from request (query for GET, body for POST/PUT)
     const adminWallet = req.body?.adminWallet || req.query?.adminWallet;
@@ -20,18 +17,18 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
       });
     }
 
-    // Get admin wallet from database config
-    const supabaseClient = createClient(config.supabaseUrl, config.supabaseServiceRoleKey);
-    const dbService = new SupabaseService(supabaseClient);
-    const dbConfig = await dbService.getConfig();
-
-    if (!dbConfig) {
-      return res.status(500).json({ error: 'Configuration not found' });
+    // Get admin wallets from environment variable
+    const adminWalletsEnv = process.env.ADMIN_WALLETS || '';
+    
+    if (!adminWalletsEnv) {
+      console.error('⚠️  ADMIN_WALLETS environment variable not set!');
+      return res.status(500).json({ 
+        error: 'Admin authentication not configured. Please set ADMIN_WALLETS environment variable.' 
+      });
     }
 
-    // Check if wallet is authorized admin
-    // Support both single wallet and comma-separated list
-    const adminWallets = dbConfig.admin_wallet
+    // Parse comma-separated list of admin wallets
+    const adminWallets = adminWalletsEnv
       .split(',')
       .map(w => w.trim())
       .filter(w => w.length > 0);
