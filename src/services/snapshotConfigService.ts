@@ -87,12 +87,12 @@ export class SnapshotConfigService {
             }
           }
         } else {
-          // Percentage share of pool
+          // Percentage share of pool - SPLIT EQUALLY among eligible wallets
           const poolShare = config.poolSize * (rule.allocationValue / 100);
-          const perNft = totalNfts > 0 ? poolShare / totalNfts : 0;
+          const perWallet = eligible.length > 0 ? poolShare / eligible.length : 0;
 
           for (const holder of eligible) {
-            const amount = holder.nftCount * perNft;
+            const amount = perWallet; // Equal amount per wallet
             ruleAllocation += amount;
 
             const existing = walletAllocations.get(holder.wallet);

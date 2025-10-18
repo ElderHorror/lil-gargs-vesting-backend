@@ -132,57 +132,73 @@ class PoolSyncDaemon {
       let walletsRemoved = 0;
       const errors: string[] = [];
 
-      // EQUAL distribution - divide pool by number of eligible wallets
-      const totalEligibleWallets = holders.length;
-      const tokensPerWallet = pool.total_pool_amount / totalEligibleWallets;
-      const sharePercentage = 100 / totalEligibleWallets;
+      // Process each rule
+      const requirements = pool.nft_requirements || [];
+      
+      for (const rule of requirements) {
+        if (rule.enabled === false) continue;
+        
+        // Find holders that meet this rule's threshold
+        const eligibleHolders = holders.filter((h: any) => h.nftCount >= (rule.threshold || 0));
+        
+        if (eligibleHolders.length === 0) {
+          console.log(`  Rule "${rule.name}": No eligible holders`);
+          continue;
+        }
+        
+        // Rule's allocationValue% of pool, split equally among eligible wallets
+        const ruleTotalTokens = (rule.allocationValue / 100) * pool.total_pool_amount;
+        const tokensPerWallet = ruleTotalTokens / eligibleHolders.length;
+        const sharePercentage = rule.allocationValue / eligibleHolders.length;
+        
+        console.log(`  Rule "${rule.name}": ${rule.allocationValue}% = ${ruleTotalTokens.toLocaleString()} tokens`);
+        console.log(`    ${eligibleHolders.length} wallets → ${tokensPerWallet.toLocaleString()} each`);
+        
+        for (const holder of eligibleHolders) {
+          try {
+            const existingVesting = currentAllocations.find(v => v.user_wallet === holder.wallet);
 
-      // Update or add holders
-      for (const holder of holders) {
-        try {
-          const existingVesting = currentAllocations.find(v => v.user_wallet === holder.wallet);
+            if (existingVesting) {
+              // Update if NFT count or allocation changed
+              if (existingVesting.nft_count !== holder.nftCount || existingVesting.token_amount !== tokensPerWallet) {
+                await this.dbService.supabase
+                  .from('vestings')
+                  .update({
+                    nft_count: holder.nftCount,
+                    token_amount: tokensPerWallet,
+                    share_percentage: sharePercentage,
+                    tier: 1,
+                    last_verified: new Date().toISOString(),
+                  })
+                  .eq('id', existingVesting.id);
 
-          if (existingVesting) {
-            // Update if NFT count changed
-            if (existingVesting.nft_count !== holder.nftCount) {
+                walletsUpdated++;
+                console.log(`    ✏️  Updated ${holder.wallet}: ${existingVesting.nft_count} → ${holder.nftCount} NFTs`);
+              }
+              currentWallets.delete(holder.wallet);
+            } else {
+              // Add new holder
               await this.dbService.supabase
                 .from('vestings')
-                .update({
+                .insert({
+                  user_wallet: holder.wallet,
+                  vesting_stream_id: pool.id,
+                  token_amount: tokensPerWallet,
                   nft_count: holder.nftCount,
-                  token_amount: tokensPerWallet, // Equal share
+                  tier: 1,
+                  vesting_mode: 'dynamic',
+                  is_active: true,
                   share_percentage: sharePercentage,
-                  last_verified: new Date().toISOString(),
-                })
-                .eq('id', existingVesting.id);
-
-              walletsUpdated++;
-              console.log(`  ✏️  Updated ${holder.wallet}: ${existingVesting.nft_count} → ${holder.nftCount} NFTs (${sharePercentage.toFixed(4)}%)`);
+                });
+              
+              console.log(`    ➕ New holder added: ${holder.wallet} (${holder.nftCount} NFTs)`);
+              walletsAdded++;
             }
-            currentWallets.delete(holder.wallet);
-          } else {
-            // Add new holder with equal share
-            const tier = 1; // Default tier
-            
-            await this.dbService.supabase
-              .from('vestings')
-              .insert({
-                user_wallet: holder.wallet,
-                vesting_stream_id: pool.id,
-                token_amount: tokensPerWallet,
-                nft_count: holder.nftCount,
-                tier,
-                vesting_mode: 'dynamic',
-                is_active: true,
-                share_percentage: sharePercentage,
-              });
-            
-            console.log(`  ➕ New holder added: ${holder.wallet} (${holder.nftCount} NFTs, ${sharePercentage.toFixed(4)}%)`);
-            walletsAdded++;
+          } catch (err) {
+            const errorMsg = `Failed to process ${holder.wallet}: ${err instanceof Error ? err.message : 'Unknown error'}`;
+            errors.push(errorMsg);
+            console.error(`    ❌ ${errorMsg}`);
           }
-        } catch (err) {
-          const errorMsg = `Failed to process ${holder.wallet}: ${err instanceof Error ? err.message : 'Unknown error'}`;
-          errors.push(errorMsg);
-          console.error(`  ❌ ${errorMsg}`);
         }
       }
 

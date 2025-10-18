@@ -54,33 +54,70 @@ async function testEqualDistribution() {
       // Get pool details
       const { data: pool } = await supabase
         .from('vesting_streams')
-        .select('name, total_pool_amount')
+        .select('name, total_pool_amount, nft_requirements')
         .eq('id', poolId)
         .single();
       
-      if (pool) {
-        console.log(`Name: ${pool.name}`);
-        console.log(`Total Pool: ${pool.total_pool_amount.toLocaleString()} tokens`);
+      if (!pool) {
+        console.log('⚠️  Pool not found');
+        continue;
       }
       
+      console.log(`Name: ${pool.name}`);
+      console.log(`Total Pool: ${pool.total_pool_amount.toLocaleString()} tokens`);
       console.log(`Eligible Wallets: ${poolVestings.length}`);
       console.log();
       
-      // Check if all allocations are equal
-      const allocations = poolVestings.map(v => v.token_amount);
-      const firstAllocation = allocations[0];
-      const allEqual = allocations.every(a => Math.abs(a - firstAllocation) < 0.01);
+      const requirements = (pool.nft_requirements as any[]) || [];
       
-      if (allEqual) {
-        console.log('✅ PASS: All wallets have equal allocation');
-        console.log(`   Each wallet gets: ${firstAllocation.toLocaleString()} tokens`);
-        console.log(`   Share percentage: ${poolVestings[0].share_percentage.toFixed(4)}%`);
+      if (requirements.length === 0) {
+        console.log('⚠️  No rules found - checking equal distribution');
+        
+        // Check if all allocations are equal
+        const allocations = poolVestings.map(v => v.token_amount);
+        const firstAllocation = allocations[0];
+        const allEqual = allocations.every(a => Math.abs(a - firstAllocation) < 0.01);
+        
+        if (allEqual) {
+          console.log('✅ PASS: All wallets have equal allocation');
+          console.log(`   Each wallet gets: ${firstAllocation.toLocaleString()} tokens`);
+        } else {
+          console.log('❌ FAIL: Allocations are NOT equal');
+        }
       } else {
-        console.log('❌ FAIL: Allocations are NOT equal');
-        console.log('\nAllocations:');
-        poolVestings.forEach((v, i) => {
-          console.log(`   ${i + 1}. ${v.user_wallet.slice(0, 8)}... - ${v.token_amount.toLocaleString()} tokens (${v.nft_count} NFTs)`);
-        });
+        console.log(`Found ${requirements.length} rule(s) - checking rule-based allocation`);
+        
+        // Check each rule
+        for (const rule of requirements) {
+          if (rule.enabled === false) continue;
+          
+          // Find wallets eligible for this rule
+          const eligibleForRule = poolVestings.filter(v => v.nft_count >= (rule.threshold || 0));
+          
+          if (eligibleForRule.length === 0) {
+            console.log(`\n  Rule "${rule.name}": No eligible wallets`);
+            continue;
+          }
+          
+          // Check if all eligible wallets get equal share
+          const allocations = eligibleForRule.map(v => v.token_amount);
+          const firstAllocation = allocations[0];
+          const allEqual = allocations.every(a => Math.abs(a - firstAllocation) < 0.01);
+          
+          const expectedTotal = (rule.allocationValue / 100) * pool.total_pool_amount;
+          const expectedPerWallet = expectedTotal / eligibleForRule.length;
+          
+          console.log(`\n  Rule "${rule.name}" (${rule.allocationValue}%):`);
+          console.log(`    Eligible wallets: ${eligibleForRule.length}`);
+          console.log(`    Expected per wallet: ${expectedPerWallet.toLocaleString()}`);
+          console.log(`    Actual per wallet: ${firstAllocation.toLocaleString()}`);
+          
+          if (allEqual && Math.abs(firstAllocation - expectedPerWallet) < 0.01) {
+            console.log(`    ✅ PASS: Equal distribution within rule`);
+          } else {
+            console.log(`    ❌ FAIL: Incorrect allocation`);
+          }
+        }
       }
       
       // Show sample wallets
@@ -93,19 +130,18 @@ async function testEqualDistribution() {
         console.log(`   ... and ${poolVestings.length - 5} more`);
       }
       
-      // Verify math
-      const totalAllocated = allocations.reduce((sum, a) => sum + a, 0);
-      const expectedPerWallet = pool ? pool.total_pool_amount / poolVestings.length : 0;
-      const expectedTotal = expectedPerWallet * poolVestings.length;
+      // Verify total allocation math
+      const allAllocations = poolVestings.map((v: any) => v.token_amount);
+      const totalAllocated = allAllocations.reduce((sum: number, a: number) => sum + a, 0);
       
-      console.log('\nMath Check:');
-      console.log(`   Expected per wallet: ${expectedPerWallet.toLocaleString()}`);
-      console.log(`   Actual per wallet: ${firstAllocation.toLocaleString()}`);
-      console.log(`   Total allocated: ${totalAllocated.toLocaleString()}`);
-      console.log(`   Expected total: ${expectedTotal.toLocaleString()}`);
+      console.log('\nTotal Allocation Check:');
+      console.log(`   Total allocated: ${totalAllocated.toLocaleString()} tokens`);
+      console.log(`   Pool size: ${pool.total_pool_amount.toLocaleString()} tokens`);
       
-      const mathCorrect = Math.abs(totalAllocated - expectedTotal) < 1;
-      console.log(`   ${mathCorrect ? '✅' : '❌'} Math is ${mathCorrect ? 'correct' : 'incorrect'}`);
+      if (requirements.length > 0) {
+        const totalRulePercentage = requirements.reduce((sum: number, r: any) => sum + (r.enabled !== false ? r.allocationValue : 0), 0);
+        console.log(`   Total rules allocation: ${totalRulePercentage}%`);
+      }
     }
     
     console.log('\n' + '═'.repeat(60));

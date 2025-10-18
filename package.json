@@ -24,7 +24,8 @@
     "test:watch": "jest --watch",
     "test:setup": "ts-node tests/setup-test-wallet.ts",
     "test:manual": "ts-node tests/manual-test.ts",
-    "test:distribution": "ts-node tests/test-equal-distribution.ts"
+    "test:distribution": "ts-node tests/test-equal-distribution.ts",
+    "recalculate": "ts-node src/recalculateAllocations.ts"
   },
   "dependencies": {
     "@chakra-ui/icons": "^2.2.4",

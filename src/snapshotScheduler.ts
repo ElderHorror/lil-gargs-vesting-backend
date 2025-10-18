@@ -139,22 +139,42 @@ async function takeSnapshot(pool: SnapshotPool): Promise<void> {
       return;
     }
     
-    // Calculate token amounts - EQUAL distribution per wallet
-    const tokensPerWallet = pool.total_pool_amount / eligibleWallets.length;
-    const sharePercentage = 100 / eligibleWallets.length;
+    // Calculate token amounts based on rules
+    // Each rule: wallets meeting threshold share allocationValue% of pool
+    const vestingRecords = [];
     
-    const vestingRecords = eligibleWallets.map(({ wallet, nftCount, tier }) => {
-      return {
-        user_wallet: wallet,
-        vesting_stream_id: pool.id,
-        token_amount: tokensPerWallet,
-        nft_count: nftCount,
-        tier,
-        vesting_mode: 'snapshot',
-        is_active: true,
-        share_percentage: sharePercentage,
-      };
-    });
+    for (const rule of requirements) {
+      if (rule.enabled === false) continue;
+      
+      // Find wallets that meet this rule's threshold
+      const eligibleForRule = eligibleWallets.filter(w => w.nftCount >= (rule.threshold || 0));
+      
+      if (eligibleForRule.length === 0) {
+        console.log(`[SNAPSHOT] Rule "${rule.name}": No eligible wallets`);
+        continue;
+      }
+      
+      // Rule's allocationValue% of pool, split equally among eligible wallets
+      const ruleTotalTokens = (rule.allocationValue / 100) * pool.total_pool_amount;
+      const tokensPerWallet = ruleTotalTokens / eligibleForRule.length;
+      const sharePercentage = rule.allocationValue / eligibleForRule.length;
+      
+      console.log(`[SNAPSHOT] Rule "${rule.name}": ${rule.allocationValue}% = ${ruleTotalTokens.toLocaleString()} tokens`);
+      console.log(`[SNAPSHOT]   ${eligibleForRule.length} wallets → ${tokensPerWallet.toLocaleString()} each`);
+      
+      for (const { wallet, nftCount, tier } of eligibleForRule) {
+        vestingRecords.push({
+          user_wallet: wallet,
+          vesting_stream_id: pool.id,
+          token_amount: tokensPerWallet,
+          nft_count: nftCount,
+          tier: tier || 1,
+          vesting_mode: 'snapshot',
+          is_active: true,
+          share_percentage: sharePercentage,
+        });
+      }
+    }
     
     // Delete existing vestings for this pool (in case of re-snapshot)
     const { error: deleteError } = await supabase
