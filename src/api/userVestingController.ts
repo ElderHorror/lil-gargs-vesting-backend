@@ -175,11 +175,13 @@ export class UserVestingController {
         console.log(`[SUMMARY] User has 1 active vesting: ${vesting.vesting_mode} pool "${stream.name}"`);
       }
 
-      // Get user's claim history
+      // Get user's claim history for THIS specific vesting only
       const claimHistory = await this.dbService.getClaimHistory(wallet);
       const TOKEN_DECIMALS = 9;
       const TOKEN_DIVISOR = Math.pow(10, TOKEN_DECIMALS);
-      const totalClaimedBaseUnits = claimHistory.reduce((sum, claim) => sum + Number(claim.amount_claimed), 0);
+      // Filter claims for this specific vesting
+      const vestingClaims = claimHistory.filter(claim => claim.vesting_id === vesting.id);
+      const totalClaimedBaseUnits = vestingClaims.reduce((sum, claim) => sum + Number(claim.amount_claimed), 0);
       const totalClaimed = totalClaimedBaseUnits / TOKEN_DIVISOR;
 
       // Calculate balances using Streamflow if deployed, otherwise use DB calculation
@@ -519,11 +521,12 @@ export class UserVestingController {
         vestedAmount = totalAllocation * vestedPercentage;
       }
 
-      // Get previous claims
+      // Get previous claims for THIS vesting only
       const claimHistory = await this.dbService.getClaimHistory(userWallet);
       const TOKEN_DECIMALS = 9;
       const TOKEN_DIVISOR = Math.pow(10, TOKEN_DECIMALS);
-      const totalClaimed = claimHistory.reduce((sum, claim) => sum + Number(claim.amount_claimed), 0) / TOKEN_DIVISOR;
+      const vestingClaims = claimHistory.filter(claim => claim.vesting_id === vesting.id);
+      const totalClaimed = vestingClaims.reduce((sum, claim) => sum + Number(claim.amount_claimed), 0) / TOKEN_DIVISOR;
 
       const unlockedBalance = Math.max(0, vestedAmount - totalClaimed);
       const claimableAmount = Math.floor(unlockedBalance);
@@ -745,7 +748,8 @@ export class UserVestingController {
       const claimHistory = await this.dbService.getClaimHistory(userWallet);
       const TOKEN_DECIMALS = 9;
       const TOKEN_DIVISOR = Math.pow(10, TOKEN_DECIMALS);
-      const totalClaimed = claimHistory.reduce((sum, claim) => sum + Number(claim.amount_claimed), 0) / TOKEN_DIVISOR;
+      const vestingClaims = claimHistory.filter(claim => claim.vesting_id === vesting.id);
+      const totalClaimed = vestingClaims.reduce((sum, claim) => sum + Number(claim.amount_claimed), 0) / TOKEN_DIVISOR;
 
       const unlockedBalance = Math.max(0, vestedAmount - totalClaimed);
       const claimableAmount = Math.floor(unlockedBalance);
