@@ -186,7 +186,11 @@ export class ClaimVerificationService {
 
     try {
       // Withdraw from Streamflow
-      const { ixs, tx } = await this.streamClient.withdraw(
+      if (!vesting.streamflow_stream_id) {
+        throw new Error('No Streamflow stream ID found for this vesting');
+      }
+      
+      const result = await this.streamClient.withdraw(
         {
           id: vesting.streamflow_stream_id,
           amount: getBN(verification.claimableAmount, 9),
@@ -194,12 +198,15 @@ export class ClaimVerificationService {
         { invoker: userKeypair }
       );
 
+      // Get transaction signature from result
+      const txSignature = result.txId || 'unknown';
+
       // Log successful claim
       await this.dbService.supabase.from('claim_history').insert({
         user_wallet: userWallet,
         amount_claimed: verification.claimableAmount,
         nft_count_at_claim: verification.currentNFTCount,
-        tx_signature: tx.toString(),
+        tx_signature: txSignature,
       });
 
       console.log(`✅ ${userWallet} claimed ${verification.claimableAmount} tokens`);
@@ -207,7 +214,7 @@ export class ClaimVerificationService {
       return {
         success: true,
         amount: verification.claimableAmount,
-        txSignature: tx.toString(),
+        txSignature,
       };
     } catch (error) {
       console.error('Claim failed:', error);

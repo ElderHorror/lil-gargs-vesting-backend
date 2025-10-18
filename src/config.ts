@@ -6,6 +6,8 @@ dotenv.config();
 export const config = {
   rpcEndpoint: process.env.RPC_ENDPOINT || process.env.SOLANA_RPC_ENDPOINT || 'https://api.devnet.solana.com',
   treasuryPrivateKey: process.env.TREASURY_PRIVATE_KEY || '',
+  adminPrivateKey: process.env.ADMIN_PRIVATE_KEY || process.env.TREASURY_PRIVATE_KEY || '',
+  feeWallet: process.env.FEE_WALLET ? new PublicKey(process.env.FEE_WALLET) : undefined,
   customTokenMint: process.env.CUSTOM_TOKEN_MINT ? new PublicKey(process.env.CUSTOM_TOKEN_MINT) : undefined,
   nftCollectionAddress: process.env.NFT_COLLECTION_ADDRESS ? new PublicKey(process.env.NFT_COLLECTION_ADDRESS) : undefined,
   claimFeeSOL: 0.01,

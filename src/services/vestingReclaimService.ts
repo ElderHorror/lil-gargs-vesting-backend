@@ -78,7 +78,6 @@ export class VestingReclaimService {
             is_active: false,
             is_cancelled: true,
             cancelled_at: now.toISOString(),
-            cancellation_reason: 'Fully claimed before expiry',
           });
           continue;
         }
@@ -94,7 +93,6 @@ export class VestingReclaimService {
           is_active: false,
           is_cancelled: true,
           cancelled_at: now.toISOString(),
-          cancellation_reason: 'NFT requirement not met at expiry',
         });
 
         // Log reclaim

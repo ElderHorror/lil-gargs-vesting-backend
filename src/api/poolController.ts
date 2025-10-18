@@ -99,13 +99,13 @@ export class PoolController {
       try {
         console.log('Auto-deploying pool to Streamflow...');
         
-        // Parse treasury keypair
+        // Parse admin keypair
         let adminKeypair: Keypair;
-        if (config.treasuryPrivateKey.startsWith('[')) {
-          const secretKey = Uint8Array.from(JSON.parse(config.treasuryPrivateKey));
+        if (config.adminPrivateKey.startsWith('[')) {
+          const secretKey = Uint8Array.from(JSON.parse(config.adminPrivateKey));
           adminKeypair = Keypair.fromSecretKey(secretKey);
         } else {
-          const decoded = bs58.decode(config.treasuryPrivateKey);
+          const decoded = bs58.decode(config.adminPrivateKey);
           adminKeypair = Keypair.fromSecretKey(decoded);
         }
 
@@ -521,13 +521,13 @@ export class PoolController {
       // Cancel Streamflow pool if deployed
       if (pool.streamflow_stream_id && this.streamflowService) {
         try {
-          // Parse treasury keypair
+          // Parse admin keypair
           let adminKeypair: Keypair;
-          if (config.treasuryPrivateKey.startsWith('[')) {
-            const secretKey = Uint8Array.from(JSON.parse(config.treasuryPrivateKey));
+          if (config.adminPrivateKey.startsWith('[')) {
+            const secretKey = Uint8Array.from(JSON.parse(config.adminPrivateKey));
             adminKeypair = Keypair.fromSecretKey(secretKey);
           } else {
-            const decoded = bs58.decode(config.treasuryPrivateKey);
+            const decoded = bs58.decode(config.adminPrivateKey);
             adminKeypair = Keypair.fromSecretKey(decoded);
           }
 
@@ -590,14 +590,14 @@ export class PoolController {
         return res.status(400).json({ error: 'Pool already deployed to Streamflow' });
       }
 
-      // Parse treasury keypair
+      // Parse admin keypair
       let adminKeypair: Keypair;
       try {
-        if (config.treasuryPrivateKey.startsWith('[')) {
-          const secretKey = Uint8Array.from(JSON.parse(config.treasuryPrivateKey));
+        if (config.adminPrivateKey.startsWith('[')) {
+          const secretKey = Uint8Array.from(JSON.parse(config.adminPrivateKey));
           adminKeypair = Keypair.fromSecretKey(secretKey);
         } else {
-          const decoded = bs58.decode(config.treasuryPrivateKey);
+          const decoded = bs58.decode(config.adminPrivateKey);
           adminKeypair = Keypair.fromSecretKey(decoded);
         }
       } catch (err) {

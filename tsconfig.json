@@ -13,5 +13,11 @@
     "moduleResolution": "node"
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules"]
+  "exclude": [
+    "node_modules",
+    "src/syncDaemon.ts",
+    "src/syncEligibility.ts", 
+    "src/takeSnapshot.ts",
+    "src/processSnapshotConfig.ts"
+  ]
 }

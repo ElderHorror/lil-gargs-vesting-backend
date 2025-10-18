@@ -10,7 +10,7 @@ import { createClient } from '@supabase/supabase-js';
 import bs58 from 'bs58';
 import { config, getConnection } from './config';
 import { VestingReclaimService } from './services/vestingReclaimService';
-import { SupabaseService } from './supabaseService';
+import { SupabaseService } from './services/supabaseService';
 import { NFTChecker } from './services/nftChecker';
 import { ICluster, GenericStreamClient, IChain } from '@streamflow/stream';
 
