@@ -1,0 +1,67 @@
+services:
+  # API Server
+  - type: web
+    name: lil-gargs-vesting-api
+    env: node
+    region: oregon
+    plan: starter
+    buildCommand: npm install && npm run build
+    startCommand: npm run api:server
+    healthCheckPath: /api/config/mode
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3001
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SOLANA_RPC_ENDPOINT
+        value: https://api.mainnet-beta.solana.com
+      - key: CUSTOM_TOKEN_MINT
+        sync: false
+      - key: TREASURY_PRIVATE_KEY
+        sync: false
+      - key: CLAIM_FEE_USD
+        value: "10"
+
+  # Snapshot Scheduler (Background Worker)
+  - type: worker
+    name: lil-gargs-snapshot-scheduler
+    env: node
+    region: oregon
+    plan: starter
+    buildCommand: npm install
+    startCommand: npm run snapshot:scheduler
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SOLANA_RPC_ENDPOINT
+        value: https://api.mainnet-beta.solana.com
+      - key: CUSTOM_TOKEN_MINT
+        sync: false
+
+  # Dynamic Pool Sync Daemon (Background Worker)
+  - type: worker
+    name: lil-gargs-dynamic-sync
+    env: node
+    region: oregon
+    plan: starter
+    buildCommand: npm install
+    startCommand: npm run sync:daemon:pool
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SOLANA_RPC_ENDPOINT
+        value: https://api.mainnet-beta.solana.com
+      - key: CUSTOM_TOKEN_MINT
+        sync: false
