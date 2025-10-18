@@ -25,6 +25,8 @@
     "test:watch": "jest --watch",
     "test:setup": "ts-node tests/setup-test-wallet.ts",
     "test:manual": "ts-node tests/manual-test.ts",
+    "db:clear": "ts-node src/clearDatabase.ts",
+    "admin:set": "ts-node src/setAdminWallet.ts",
     "test:distribution": "ts-node tests/test-equal-distribution.ts",
     "recalculate": "ts-node src/recalculateAllocations.ts"
   },

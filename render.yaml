@@ -25,6 +25,14 @@ services:
         sync: false
       - key: CLAIM_FEE_USD
         value: "10"
+      - key: ALLOWED_ORIGINS
+        value: https://your-frontend-domain.com
+      - key: HELIUS_API_KEY
+        sync: false
+      - key: NFT_COLLECTION_ADDRESS
+        sync: false
+      - key: FEE_WALLET
+        sync: false
 
   # Snapshot Scheduler (Background Worker)
   - type: worker

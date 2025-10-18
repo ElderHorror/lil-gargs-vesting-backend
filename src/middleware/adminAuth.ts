@@ -30,7 +30,13 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
     }
 
     // Check if wallet is authorized admin
-    if (dbConfig.admin_wallet !== adminWallet) {
+    // Support both single wallet and comma-separated list
+    const adminWallets = dbConfig.admin_wallet
+      .split(',')
+      .map(w => w.trim())
+      .filter(w => w.length > 0);
+    
+    if (!adminWallets.includes(adminWallet)) {
       return res.status(403).json({ 
         error: 'Access denied. This wallet is not authorized as an admin.' 
       });
