@@ -48,7 +48,7 @@ export class CronController {
       // Check for pending snapshots
       const supabase = createClient(config.supabaseUrl, config.supabaseServiceRoleKey);
       const { data: pools, error } = await supabase
-        .from('vesting_pools')
+        .from('vesting_streams')
         .select('*')
         .eq('vesting_mode', 'snapshot')
         .eq('snapshot_taken', false)
@@ -77,7 +77,7 @@ export class CronController {
           
           // Mark as taken (actual snapshot processing would happen here)
           await supabase
-            .from('vesting_pools')
+            .from('vesting_streams')
             .update({ snapshot_taken: true })
             .eq('id', pool.id);
         }
@@ -112,7 +112,7 @@ export class CronController {
       // Get all dynamic pools
       const supabase = createClient(config.supabaseUrl, config.supabaseServiceRoleKey);
       const { data: pools, error } = await supabase
-        .from('vesting_pools')
+        .from('vesting_streams')
         .select('*')
         .eq('vesting_mode', 'dynamic')
         .eq('is_active', true);

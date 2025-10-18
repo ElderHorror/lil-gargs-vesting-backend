@@ -75,12 +75,12 @@ export async function syncDynamicPool(pool: any) {
       // Add/update users
       for (const holder of eligibleHolders) {
         // Check if user already has vesting for this pool
-        const { data: existing } = await dbService.supabase
+        const { data: existing, error: fetchError } = await dbService.supabase
           .from('vestings')
           .select('*')
           .eq('user_wallet', holder.wallet)
           .eq('vesting_stream_id', pool.id)
-          .single();
+          .maybeSingle();
         
         if (existing) {
           // Update existing allocation
