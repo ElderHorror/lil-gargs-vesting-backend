@@ -21,6 +21,7 @@ export class ConfigController {
   /**
    * GET /api/config/check-admin?wallet=<address>
    * Check if a wallet is an admin (no auth required, just checks)
+   * Uses ADMIN_WALLETS environment variable for multiple admin support
    */
   async checkAdmin(req: Request, res: Response) {
     try {
@@ -30,24 +31,45 @@ export class ConfigController {
         return res.status(400).json({ error: 'wallet parameter is required' });
       }
 
-      let dbConfig;
-      try {
-        dbConfig = await this.dbService.getConfig();
-      } catch (dbError) {
-        console.error('Database connection error in checkAdmin:', dbError);
-        // Return a safe response instead of failing completely
-        return res.json({
-          success: true,
-          isAdmin: false,
-          warning: 'Database temporarily unavailable',
-        });
+      // Check against ADMIN_WALLETS environment variable
+      const adminWalletsEnv = process.env.ADMIN_WALLETS || '';
+      
+      if (!adminWalletsEnv) {
+        console.warn('⚠️  ADMIN_WALLETS environment variable not set, falling back to database');
+        
+        // Fallback to database check
+        try {
+          const dbConfig = await this.dbService.getConfig();
+          if (!dbConfig) {
+            return res.json({
+              success: true,
+              isAdmin: false,
+              warning: 'No admin configuration found',
+            });
+          }
+          
+          const isAdmin = dbConfig.admin_wallet === wallet;
+          return res.json({
+            success: true,
+            isAdmin,
+          });
+        } catch (dbError) {
+          console.error('Database connection error in checkAdmin:', dbError);
+          return res.json({
+            success: true,
+            isAdmin: false,
+            warning: 'Database temporarily unavailable',
+          });
+        }
       }
 
-      if (!dbConfig) {
-        return res.status(500).json({ error: 'Configuration not found' });
-      }
-
-      const isAdmin = dbConfig.admin_wallet === wallet;
+      // Parse comma-separated list of admin wallets
+      const adminWallets = adminWalletsEnv
+        .split(',')
+        .map(w => w.trim())
+        .filter(w => w.length > 0);
+      
+      const isAdmin = adminWallets.includes(wallet);
 
       res.json({
         success: true,
