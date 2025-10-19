@@ -45,6 +45,9 @@ export class StreamflowService {
 
       // Create stream where admin is BOTH sender and recipient
       // This allows admin to withdraw vested tokens and distribute them
+      const duration = endTime - startTime;
+      const amountPerPeriod = Math.max(1, Math.floor(totalAmount / duration));
+      
       const createStreamParams = {
         recipient: adminKeypair.publicKey.toBase58(), // Admin receives the vested tokens
         tokenId: tokenMint.toBase58(),
@@ -53,7 +56,7 @@ export class StreamflowService {
         period: 1, // Vesting updates every second
         cliff: cliffTime || startTime, // Cliff time (default to start if none)
         cliffAmount: getBN(0, 9), // No cliff amount, just time-based
-        amountPerPeriod: getBN(Math.floor(totalAmount / (endTime - startTime)), 9),
+        amountPerPeriod: getBN(amountPerPeriod, 9), // Ensure at least 1 token per period
         name: poolName,
         canTopup: false,
         cancelableBySender: true,

@@ -80,7 +80,8 @@ export interface WalletEligibilityStatus {
 // Vesting modes
 export enum VestingMode {
   SNAPSHOT = 'snapshot',
-  DYNAMIC = 'dynamic'
+  DYNAMIC = 'dynamic',
+  MANUAL = 'manual'
 }
 
 // Claim verification types

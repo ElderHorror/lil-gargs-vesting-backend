@@ -200,9 +200,9 @@ export class ConfigController {
         });
       }
 
-      if (mode !== VestingMode.SNAPSHOT && mode !== VestingMode.DYNAMIC) {
+      if (mode !== VestingMode.SNAPSHOT && mode !== VestingMode.DYNAMIC && mode !== VestingMode.MANUAL) {
         return res.status(400).json({
-          error: 'mode must be "snapshot" or "dynamic"',
+          error: 'mode must be "snapshot", "dynamic", or "manual"',
         });
       }
 
