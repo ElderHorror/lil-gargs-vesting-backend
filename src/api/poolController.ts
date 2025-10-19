@@ -158,19 +158,41 @@ export class PoolController {
 
         const startTimestamp = Math.floor(new Date(stream.start_time).getTime() / 1000);
         const endTimestamp = Math.floor(new Date(stream.end_time).getTime() / 1000);
+        const nowTimestamp = Math.floor(Date.now() / 1000);
         
-        const streamflowResult = await this.streamflowService.createVestingPool({
-          adminKeypair,
-          tokenMint: config.customTokenMint!,
-          totalAmount: stream.total_pool_amount,
-          startTime: startTimestamp,
-          endTime: endTimestamp,
-          poolName: stream.name,
-        });
-
-        streamflowId = streamflowResult.streamId;
-        streamflowSignature = streamflowResult.signature;
-
+        // Validate timestamps for Streamflow
+        if (startTimestamp < nowTimestamp) {
+          console.warn(`Start time ${startTimestamp} is in the past (now: ${nowTimestamp}). Adjusting to current time + 60 seconds.`);
+          // Adjust start time to be 60 seconds in the future
+          const adjustedStart = nowTimestamp + 60;
+          const duration = endTimestamp - startTimestamp;
+          const adjustedEnd = adjustedStart + duration;
+          
+          const streamflowResult = await this.streamflowService.createVestingPool({
+            adminKeypair,
+            tokenMint: config.customTokenMint!,
+            totalAmount: stream.total_pool_amount,
+            startTime: adjustedStart,
+            endTime: adjustedEnd,
+            poolName: stream.name,
+          });
+          
+          streamflowId = streamflowResult.streamId;
+          streamflowSignature = streamflowResult.signature;
+        } else {
+          const streamflowResult = await this.streamflowService.createVestingPool({
+            adminKeypair,
+            tokenMint: config.customTokenMint!,
+            totalAmount: stream.total_pool_amount,
+            startTime: startTimestamp,
+            endTime: endTimestamp,
+            poolName: stream.name,
+          });
+          
+          streamflowId = streamflowResult.streamId;
+          streamflowSignature = streamflowResult.signature;
+        }
+        
         // Update DB with Streamflow ID
         await this.dbService.supabase
           .from('vesting_streams')
