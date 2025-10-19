@@ -34,7 +34,8 @@
     "test:delete-all": "ts-node scripts/deleteAllTestPools.ts",
     "test:snapshot": "ts-node scripts/testSnapshot.ts",
     "test:create-snapshot-pool": "ts-node scripts/createSnapshotTestPool.ts",
-    "test:create-cliff-pool": "ts-node scripts/createCliffTestPool.ts"
+    "test:create-cliff-pool": "ts-node scripts/createCliffTestPool.ts",
+    "pool:create-manual": "ts-node scripts/createManualPool.ts"
   },
   "dependencies": {
     "@chakra-ui/icons": "^2.2.4",

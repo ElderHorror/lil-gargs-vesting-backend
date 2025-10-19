@@ -34,11 +34,14 @@ export class PoolController {
         total_pool_amount,
         vesting_duration_days,
         cliff_duration_days,
+        vesting_duration_seconds,
+        cliff_duration_seconds,
         start_time,
         end_time,
         is_active,
         vesting_mode,
         rules, // Array of eligibility rules from frontend
+        manual_allocations, // Array of {wallet, amount, tier?, note?} for manual mode
       } = req.body;
 
       if (!name || !total_pool_amount || vesting_duration_days === undefined) {
@@ -77,10 +80,13 @@ export class PoolController {
           total_pool_amount,
           vesting_duration_days: durationDaysInt,
           cliff_duration_days: cliffDaysInt,
+          vesting_duration_seconds: vesting_duration_seconds || (vesting_duration_days * 86400),
+          cliff_duration_seconds: cliff_duration_seconds || (cliffDaysInt * 86400),
           start_time: start_time || new Date().toISOString(),
           end_time: end_time || new Date(Date.now() + vesting_duration_days * 24 * 60 * 60 * 1000).toISOString(),
           is_active: is_active !== undefined ? is_active : true,
           vesting_mode: vesting_mode || 'snapshot',
+          snapshot_taken: vesting_mode === 'manual' ? true : false, // Manual allocations are pre-taken
           nft_requirements: nftRequirements,
           tier_allocations: {}, // Empty object for now
           grace_period_days: 30,
@@ -90,6 +96,47 @@ export class PoolController {
 
       if (error) {
         throw new Error(`Failed to create pool: ${error.message}`);
+      }
+
+      // If manual mode, create allocations for specified wallets
+      if (vesting_mode === 'manual' && manual_allocations && Array.isArray(manual_allocations)) {
+        console.log(`Creating ${manual_allocations.length} manual allocations...`);
+        
+        for (const allocation of manual_allocations) {
+          const { wallet, allocationType, allocationValue, note } = allocation;
+          
+          // Calculate token amount based on allocation type
+          let tokenAmount: number;
+          let sharePercentage: number;
+          
+          if (allocationType === 'PERCENTAGE') {
+            sharePercentage = allocationValue;
+            tokenAmount = (total_pool_amount * allocationValue) / 100;
+          } else {
+            // FIXED
+            tokenAmount = allocationValue;
+            sharePercentage = (allocationValue / total_pool_amount) * 100;
+          }
+
+          const { error: vestingError } = await this.dbService.supabase
+            .from('vestings')
+            .insert({
+              vesting_stream_id: stream.id,
+              user_wallet: wallet,
+              token_amount: tokenAmount,
+              share_percentage: sharePercentage,
+              tier: 1,
+              nft_count: 0,
+              is_active: true,
+              is_cancelled: false,
+            });
+
+          if (vestingError) {
+            console.error(`Failed to create vesting for ${wallet}:`, vestingError);
+          } else {
+            console.log(`✅ Allocated ${tokenAmount} tokens (${sharePercentage.toFixed(2)}%) to ${wallet}${note ? ' (' + note + ')' : ''}`);
+          }
+        }
       }
 
       // Auto-deploy to Streamflow
