@@ -1,10 +1,25 @@
 import { Request, Response } from 'express';
-import { Connection, PublicKey, Keypair } from '@solana/web3.js';
+import { Connection, PublicKey, Keypair, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { getAccount } from '@solana/spl-token';
 import bs58 from 'bs58';
 import { SupabaseService } from '../services/supabaseService';
 import { StreamflowService } from '../services/streamflowService';
 import { config } from '../config';
 import { getSupabaseClient } from '../lib/supabaseClient';
+
+interface ValidationResult {
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+  checks: {
+    timestamp: { valid: boolean; message: string; adjustedStart?: number };
+    solBalance: { valid: boolean; current: number; required: number; message: string };
+    tokenBalance: { valid: boolean; current: number; required: number; message: string };
+    treasury: { valid: boolean; address: string };
+    allocations: { valid: boolean; total: number; message: string };
+  };
+  canProceedWithoutStreamflow: boolean;
+}
 
 /**
  * Pool Management API Controller
@@ -20,6 +35,182 @@ export class PoolController {
     this.dbService = new SupabaseService(supabaseClient);
     this.connection = new Connection(config.rpcEndpoint, 'confirmed');
     this.streamflowService = new StreamflowService();
+  }
+
+  /**
+   * Validate pool creation requirements
+   */
+  private async validatePoolCreation(params: {
+    start_time?: string;
+    total_pool_amount: number;
+    vesting_mode: string;
+    manual_allocations?: Array<{ allocationType: string; allocationValue: number }>;
+  }): Promise<ValidationResult> {
+    const result: ValidationResult = {
+      valid: true,
+      errors: [],
+      warnings: [],
+      checks: {
+        timestamp: { valid: true, message: '' },
+        solBalance: { valid: true, current: 0, required: 0.015, message: '' }, // ~0.01266 SOL + buffer
+        tokenBalance: { valid: true, current: 0, required: params.total_pool_amount, message: '' },
+        treasury: { valid: true, address: '' },
+        allocations: { valid: true, total: 0, message: '' },
+      },
+      canProceedWithoutStreamflow: true,
+    };
+
+    try {
+      // Parse admin keypair
+      let adminKeypair: Keypair;
+      if (config.adminPrivateKey.startsWith('[')) {
+        const secretKey = Uint8Array.from(JSON.parse(config.adminPrivateKey));
+        adminKeypair = Keypair.fromSecretKey(secretKey);
+      } else {
+        const decoded = bs58.decode(config.adminPrivateKey);
+        adminKeypair = Keypair.fromSecretKey(decoded);
+      }
+      result.checks.treasury.address = adminKeypair.publicKey.toBase58();
+
+      // 1. Validate timestamp
+      const startTimestamp = params.start_time 
+        ? Math.floor(new Date(params.start_time).getTime() / 1000)
+        : Math.floor(Date.now() / 1000);
+      const nowTimestamp = Math.floor(Date.now() / 1000);
+
+      if (startTimestamp < nowTimestamp) {
+        result.checks.timestamp.valid = false;
+        result.checks.timestamp.adjustedStart = nowTimestamp + 60;
+        result.checks.timestamp.message = `Start time is in the past. Will be adjusted to ${new Date((nowTimestamp + 60) * 1000).toISOString()}`;
+        result.warnings.push(result.checks.timestamp.message);
+      } else {
+        result.checks.timestamp.message = 'Start time is valid';
+      }
+
+      // 2. Check SOL balance
+      const solBalance = await this.connection.getBalance(adminKeypair.publicKey);
+      const solBalanceInSOL = solBalance / LAMPORTS_PER_SOL;
+      result.checks.solBalance.current = solBalanceInSOL;
+
+      if (solBalanceInSOL < 0.015) {
+        result.checks.solBalance.valid = false;
+        result.checks.solBalance.message = `Insufficient SOL for Streamflow deployment. Required: ~0.015 SOL, Available: ${solBalanceInSOL.toFixed(4)} SOL`;
+        result.errors.push(result.checks.solBalance.message);
+        result.valid = false;
+      } else {
+        result.checks.solBalance.message = `SOL balance sufficient: ${solBalanceInSOL.toFixed(4)} SOL`;
+      }
+
+      // 3. Check token balance
+      if (config.customTokenMint) {
+        try {
+          const { getAssociatedTokenAddress } = await import('@solana/spl-token');
+          const treasuryTokenAccount = await getAssociatedTokenAddress(
+            config.customTokenMint,
+            adminKeypair.publicKey
+          );
+          
+          const tokenAccountInfo = await getAccount(this.connection, treasuryTokenAccount);
+          const tokenBalance = Number(tokenAccountInfo.amount) / 1e9;
+          result.checks.tokenBalance.current = tokenBalance;
+
+          if (tokenBalance < params.total_pool_amount) {
+            result.checks.tokenBalance.valid = false;
+            result.checks.tokenBalance.message = `Insufficient tokens. Required: ${params.total_pool_amount}, Available: ${tokenBalance}`;
+            result.errors.push(result.checks.tokenBalance.message);
+            result.valid = false;
+          } else {
+            result.checks.tokenBalance.message = `Token balance sufficient: ${tokenBalance}`;
+          }
+        } catch (err) {
+          result.checks.tokenBalance.valid = false;
+          result.checks.tokenBalance.message = `Token account not found or error checking balance`;
+          result.errors.push(result.checks.tokenBalance.message);
+          result.valid = false;
+        }
+      }
+
+      // 4. Validate allocations (manual mode only)
+      if (params.vesting_mode === 'manual' && params.manual_allocations) {
+        let totalPercentage = 0;
+        let totalFixed = 0;
+
+        for (const allocation of params.manual_allocations) {
+          if (allocation.allocationType === 'PERCENTAGE') {
+            totalPercentage += allocation.allocationValue;
+          } else {
+            totalFixed += allocation.allocationValue;
+          }
+        }
+
+        result.checks.allocations.total = totalPercentage;
+
+        // Check if percentages EXCEED 100% (ERROR - impossible to fulfill)
+        if (totalPercentage > 100) {
+          result.checks.allocations.valid = false;
+          result.checks.allocations.message = `Percentage allocations sum to ${totalPercentage.toFixed(2)}%, which exceeds 100%. Cannot allocate more than the pool.`;
+          result.errors.push(result.checks.allocations.message);
+          result.valid = false;
+        }
+        // Warn if less than 100% (OK - remainder stays in treasury)
+        else if (totalPercentage > 0 && totalPercentage < 100) {
+          const unallocated = 100 - totalPercentage;
+          result.checks.allocations.message = `Percentage allocations sum to ${totalPercentage.toFixed(2)}%. ${unallocated.toFixed(2)}% (${(params.total_pool_amount * unallocated / 100).toFixed(2)} tokens) will remain in treasury wallet.`;
+          result.warnings.push(result.checks.allocations.message);
+        }
+
+        // Check if fixed amounts exceed pool (ERROR)
+        if (totalFixed > params.total_pool_amount) {
+          result.checks.allocations.valid = false;
+          result.checks.allocations.message = `Fixed allocations (${totalFixed} tokens) exceed pool amount (${params.total_pool_amount} tokens)`;
+          result.errors.push(result.checks.allocations.message);
+          result.valid = false;
+        }
+        // Warn if fixed amounts leave remainder
+        else if (totalFixed > 0 && totalFixed < params.total_pool_amount) {
+          const unallocated = params.total_pool_amount - totalFixed;
+          result.checks.allocations.message = `Fixed allocations total ${totalFixed} tokens. ${unallocated.toFixed(2)} tokens will remain in treasury wallet.`;
+          result.warnings.push(result.checks.allocations.message);
+        }
+
+        if (result.checks.allocations.valid && result.checks.allocations.message === '') {
+          result.checks.allocations.message = 'Allocations are valid (100% allocated)';
+        }
+      }
+
+      // Determine if can proceed without Streamflow
+      result.canProceedWithoutStreamflow = result.checks.treasury.valid && result.checks.allocations.valid;
+
+    } catch (error) {
+      result.valid = false;
+      result.errors.push(`Validation error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+
+    return result;
+  }
+
+  /**
+   * POST /api/pools/validate
+   * Validate pool creation requirements before creating
+   */
+  async validatePool(req: Request, res: Response) {
+    try {
+      const { start_time, total_pool_amount, vesting_mode, manual_allocations } = req.body;
+
+      const validation = await this.validatePoolCreation({
+        start_time,
+        total_pool_amount,
+        vesting_mode: vesting_mode || 'snapshot',
+        manual_allocations,
+      });
+
+      res.json(validation);
+    } catch (error) {
+      console.error('Failed to validate pool:', error);
+      res.status(500).json({
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
   }
 
   /**
@@ -42,6 +233,7 @@ export class PoolController {
         vesting_mode,
         rules, // Array of eligibility rules from frontend
         manual_allocations, // Array of {wallet, amount, tier?, note?} for manual mode
+        skipStreamflow, // Optional: skip Streamflow deployment
       } = req.body;
 
       if (!name || !total_pool_amount || vesting_duration_days === undefined) {
@@ -54,6 +246,34 @@ export class PoolController {
       if (vesting_duration_days < 0.001) {
         return res.status(400).json({
           error: 'vesting_duration_days must be at least 0.001 (about 1.5 minutes)',
+        });
+      }
+
+      // Run validation
+      const validation = await this.validatePoolCreation({
+        start_time,
+        total_pool_amount,
+        vesting_mode: vesting_mode || 'snapshot',
+        manual_allocations,
+      });
+
+      // If validation fails and not skipping Streamflow, return error with options
+      if (!validation.valid && !skipStreamflow) {
+        return res.status(400).json({
+          success: false,
+          error: 'Pool validation failed',
+          errorType: validation.checks.solBalance.valid ? 'INSUFFICIENT_TOKENS' : 'INSUFFICIENT_SOL',
+          validation,
+          options: {
+            canProceedWithoutStreamflow: validation.canProceedWithoutStreamflow,
+            canAdjustTimestamp: !validation.checks.timestamp.valid,
+            adjustedTimestamp: validation.checks.timestamp.adjustedStart,
+          },
+          suggestions: [
+            ...(!validation.checks.solBalance.valid ? [`Fund treasury wallet (${validation.checks.treasury.address}) with at least 0.015 SOL`] : []),
+            ...(!validation.checks.tokenBalance.valid ? [`Fund treasury wallet with at least ${total_pool_amount} tokens`] : []),
+            ...(validation.canProceedWithoutStreamflow ? ['Create pool without Streamflow deployment (database only)'] : []),
+          ],
         });
       }
 
@@ -139,70 +359,76 @@ export class PoolController {
         }
       }
 
-      // Auto-deploy to Streamflow
+      // Auto-deploy to Streamflow (unless skipped)
       let streamflowId = null;
       let streamflowSignature = null;
+      let streamflowError = null;
       
-      try {
-        console.log('Auto-deploying pool to Streamflow...');
-        
-        // Parse admin keypair
-        let adminKeypair: Keypair;
-        if (config.adminPrivateKey.startsWith('[')) {
-          const secretKey = Uint8Array.from(JSON.parse(config.adminPrivateKey));
-          adminKeypair = Keypair.fromSecretKey(secretKey);
-        } else {
-          const decoded = bs58.decode(config.adminPrivateKey);
-          adminKeypair = Keypair.fromSecretKey(decoded);
-        }
+      if (!skipStreamflow) {
+        try {
+          console.log('Auto-deploying pool to Streamflow...');
+          
+          // Parse admin keypair
+          let adminKeypair: Keypair;
+          if (config.adminPrivateKey.startsWith('[')) {
+            const secretKey = Uint8Array.from(JSON.parse(config.adminPrivateKey));
+            adminKeypair = Keypair.fromSecretKey(secretKey);
+          } else {
+            const decoded = bs58.decode(config.adminPrivateKey);
+            adminKeypair = Keypair.fromSecretKey(decoded);
+          }
 
-        const startTimestamp = Math.floor(new Date(stream.start_time).getTime() / 1000);
-        const endTimestamp = Math.floor(new Date(stream.end_time).getTime() / 1000);
-        const nowTimestamp = Math.floor(Date.now() / 1000);
-        
-        // Validate timestamps for Streamflow
-        if (startTimestamp < nowTimestamp) {
-          console.warn(`Start time ${startTimestamp} is in the past (now: ${nowTimestamp}). Adjusting to current time + 60 seconds.`);
-          // Adjust start time to be 60 seconds in the future
-          const adjustedStart = nowTimestamp + 60;
-          const duration = endTimestamp - startTimestamp;
-          const adjustedEnd = adjustedStart + duration;
+          const startTimestamp = Math.floor(new Date(stream.start_time).getTime() / 1000);
+          const endTimestamp = Math.floor(new Date(stream.end_time).getTime() / 1000);
+          const nowTimestamp = Math.floor(Date.now() / 1000);
           
-          const streamflowResult = await this.streamflowService.createVestingPool({
-            adminKeypair,
-            tokenMint: config.customTokenMint!,
-            totalAmount: stream.total_pool_amount,
-            startTime: adjustedStart,
-            endTime: adjustedEnd,
-            poolName: stream.name,
-          });
-          
-          streamflowId = streamflowResult.streamId;
-          streamflowSignature = streamflowResult.signature;
-        } else {
-          const streamflowResult = await this.streamflowService.createVestingPool({
-            adminKeypair,
-            tokenMint: config.customTokenMint!,
-            totalAmount: stream.total_pool_amount,
-            startTime: startTimestamp,
+          // Validate timestamps for Streamflow
+          if (startTimestamp < nowTimestamp) {
+            console.warn(`Start time ${startTimestamp} is in the past (now: ${nowTimestamp}). Adjusting to current time + 60 seconds.`);
+            // Adjust start time to be 60 seconds in the future
+            const adjustedStart = nowTimestamp + 60;
+            const duration = endTimestamp - startTimestamp;
+            const adjustedEnd = adjustedStart + duration;
+            
+            const streamflowResult = await this.streamflowService.createVestingPool({
+              adminKeypair,
+              tokenMint: config.customTokenMint!,
+              totalAmount: stream.total_pool_amount,
+              startTime: adjustedStart,
+              endTime: adjustedEnd,
+              poolName: stream.name,
+            });
+            
+            streamflowId = streamflowResult.streamId;
+            streamflowSignature = streamflowResult.signature;
+          } else {
+            const streamflowResult = await this.streamflowService.createVestingPool({
+              adminKeypair,
+              tokenMint: config.customTokenMint!,
+              totalAmount: stream.total_pool_amount,
+              startTime: startTimestamp,
             endTime: endTimestamp,
             poolName: stream.name,
           });
           
           streamflowId = streamflowResult.streamId;
           streamflowSignature = streamflowResult.signature;
-        }
-        
-        // Update DB with Streamflow ID
-        await this.dbService.supabase
-          .from('vesting_streams')
-          .update({ streamflow_stream_id: streamflowId })
-          .eq('id', stream.id);
+          }
+          
+          // Update DB with Streamflow ID
+          await this.dbService.supabase
+            .from('vesting_streams')
+            .update({ streamflow_stream_id: streamflowId })
+            .eq('id', stream.id);
 
-        console.log('Pool deployed to Streamflow:', streamflowId);
-      } catch (streamflowError) {
-        console.error('Failed to deploy to Streamflow (pool still created in DB):', streamflowError);
-        // Don't fail the entire request - pool is still created in DB
+          console.log('Pool deployed to Streamflow:', streamflowId);
+        } catch (error) {
+          streamflowError = error instanceof Error ? error.message : 'Unknown error';
+          console.error('Failed to deploy to Streamflow (pool still created in DB):', streamflowError);
+          // Don't fail the entire request - pool is still created in DB
+        }
+      } else {
+        console.log('Skipping Streamflow deployment (skipStreamflow=true)');
       }
 
       res.json({
@@ -213,6 +439,8 @@ export class PoolController {
         },
         streamflowDeployed: !!streamflowId,
         streamflowSignature,
+        streamflowError,
+        validation: !skipStreamflow ? validation : undefined,
       });
     } catch (error) {
       console.error('Failed to create pool:', error);
@@ -399,6 +627,131 @@ export class PoolController {
       });
     } catch (error) {
       console.error('Failed to update pool rule:', error);
+      res.status(500).json({
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  }
+
+  /**
+   * PUT /api/pools/:id/allocations
+   * Update manual pool allocations (add/remove/edit wallets)
+   */
+  async updateAllocations(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      const { allocations } = req.body;
+
+      if (!id || !allocations || !Array.isArray(allocations)) {
+        return res.status(400).json({ error: 'Pool ID and allocations array are required' });
+      }
+
+      // Get pool details
+      const { data: pool, error: fetchError } = await this.dbService.supabase
+        .from('vesting_streams')
+        .select('*')
+        .eq('id', id)
+        .single();
+
+      if (fetchError || !pool) {
+        return res.status(404).json({ error: 'Pool not found' });
+      }
+
+      // Only allow editing manual mode pools
+      if (pool.vesting_mode !== 'manual') {
+        return res.status(400).json({ 
+          error: 'Only manual mode pools can have allocations edited directly' 
+        });
+      }
+
+      // Validate allocations
+      let totalPercentage = 0;
+      let totalFixed = 0;
+
+      for (const allocation of allocations) {
+        if (!allocation.wallet || allocation.wallet.length < 32) {
+          return res.status(400).json({ 
+            error: `Invalid wallet address: ${allocation.wallet}` 
+          });
+        }
+
+        if (allocation.allocationValue <= 0) {
+          return res.status(400).json({ 
+            error: `Allocation value must be greater than 0 for wallet ${allocation.wallet}` 
+          });
+        }
+
+        if (allocation.allocationType === 'PERCENTAGE') {
+          totalPercentage += allocation.allocationValue;
+        } else {
+          totalFixed += allocation.allocationValue;
+        }
+      }
+
+      // Check if percentages exceed 100%
+      if (totalPercentage > 100) {
+        return res.status(400).json({ 
+          error: `Percentage allocations sum to ${totalPercentage.toFixed(2)}%, which exceeds 100%` 
+        });
+      }
+
+      // Check if fixed amounts exceed pool
+      if (totalFixed > pool.total_pool_amount) {
+        return res.status(400).json({ 
+          error: `Fixed allocations (${totalFixed}) exceed pool amount (${pool.total_pool_amount})` 
+        });
+      }
+
+      // Delete existing vestings for this pool
+      const { error: deleteError } = await this.dbService.supabase
+        .from('vestings')
+        .delete()
+        .eq('vesting_stream_id', id);
+
+      if (deleteError) {
+        throw new Error(`Failed to delete old allocations: ${deleteError.message}`);
+      }
+
+      // Insert new allocations
+      const vestingRecords = allocations.map((allocation: any) => {
+        let tokenAmount: number;
+        let sharePercentage: number;
+
+        if (allocation.allocationType === 'PERCENTAGE') {
+          sharePercentage = allocation.allocationValue;
+          tokenAmount = (pool.total_pool_amount * allocation.allocationValue) / 100;
+        } else {
+          tokenAmount = allocation.allocationValue;
+          sharePercentage = (allocation.allocationValue / pool.total_pool_amount) * 100;
+        }
+
+        return {
+          vesting_stream_id: id,
+          user_wallet: allocation.wallet,
+          token_amount: tokenAmount,
+          share_percentage: sharePercentage,
+          tier: 1,
+          nft_count: 0,
+          is_active: true,
+          is_cancelled: false,
+        };
+      });
+
+      const { error: insertError } = await this.dbService.supabase
+        .from('vestings')
+        .insert(vestingRecords);
+
+      if (insertError) {
+        throw new Error(`Failed to insert new allocations: ${insertError.message}`);
+      }
+
+      res.json({
+        success: true,
+        message: `Successfully updated allocations for ${allocations.length} wallet(s)`,
+        allocations: vestingRecords,
+      });
+    } catch (error) {
+      console.error('Failed to update allocations:', error);
       res.status(500).json({
         error: error instanceof Error ? error.message : 'Unknown error',
       });
@@ -704,6 +1057,98 @@ export class PoolController {
       });
     } catch (error) {
       console.error('Failed to deploy to Streamflow:', error);
+      res.status(500).json({
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  }
+
+  /**
+   * POST /api/pools/:id/cancel-streamflow
+   * Cancel a Streamflow pool and reclaim rent + unvested tokens
+   * Accepts either database pool ID or Streamflow stream ID
+   */
+  async cancelStreamflowPool(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      const { streamflowId } = req.body; // Optional: direct Streamflow ID
+
+      if (!id && !streamflowId) {
+        return res.status(400).json({ error: 'Pool ID or Streamflow ID is required' });
+      }
+
+      let streamId: string;
+      let poolId: string | null = null;
+
+      // If streamflowId provided directly, use it
+      if (streamflowId) {
+        streamId = streamflowId;
+        
+        // Try to find pool in database for cleanup
+        const { data: pool } = await this.dbService.supabase
+          .from('vesting_streams')
+          .select('id')
+          .eq('streamflow_stream_id', streamflowId)
+          .single();
+        
+        if (pool) {
+          poolId = pool.id;
+        }
+      } else {
+        // Get pool details from database
+        const { data: pool, error: poolError } = await this.dbService.supabase
+          .from('vesting_streams')
+          .select('*')
+          .eq('id', id)
+          .single();
+
+        if (poolError || !pool) {
+          return res.status(404).json({ error: 'Pool not found' });
+        }
+
+        if (!pool.streamflow_stream_id) {
+          return res.status(400).json({ error: 'Pool is not deployed to Streamflow' });
+        }
+
+        streamId = pool.streamflow_stream_id;
+        poolId = pool.id;
+      }
+
+      // Parse admin keypair
+      let adminKeypair: Keypair;
+      if (config.adminPrivateKey.startsWith('[')) {
+        const secretKey = Uint8Array.from(JSON.parse(config.adminPrivateKey));
+        adminKeypair = Keypair.fromSecretKey(secretKey);
+      } else {
+        const decoded = bs58.decode(config.adminPrivateKey);
+        adminKeypair = Keypair.fromSecretKey(decoded);
+      }
+
+      // Cancel the stream
+      const result = await this.streamflowService.cancelVestingPool(
+        streamId,
+        adminKeypair
+      );
+
+      // Update database if pool found
+      if (poolId) {
+        await this.dbService.supabase
+          .from('vesting_streams')
+          .update({ 
+            is_active: false,
+            streamflow_stream_id: null // Clear Streamflow ID
+          })
+          .eq('id', poolId);
+      }
+
+      res.json({
+        success: true,
+        signature: result.signature,
+        streamflowId: streamId,
+        message: 'Pool canceled successfully. Rent and unvested tokens returned to treasury.',
+      });
+    } catch (error) {
+      console.error('Failed to cancel pool:', error);
       res.status(500).json({
         error: error instanceof Error ? error.message : 'Unknown error',
       });

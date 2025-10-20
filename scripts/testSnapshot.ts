@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import * as dotenv from 'dotenv';
-import { checkAndTakeSnapshots } from '../src/snapshotScheduler';
+import { checkPendingSnapshots } from '../src/snapshotScheduler';
 
 dotenv.config();
 
@@ -55,7 +55,7 @@ async function testSnapshot() {
   console.log('\n🚀 Running snapshot scheduler...\n');
 
   try {
-    await checkAndTakeSnapshots();
+    await checkPendingSnapshots();
     console.log('\n✅ Snapshot scheduler completed successfully!');
   } catch (err) {
     console.error('\n❌ Snapshot scheduler failed:', err);

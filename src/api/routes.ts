@@ -36,15 +36,18 @@ router.post('/snapshot/process', (req, res) => snapshotController.processSnapsho
 router.post('/snapshot/commit', (req, res) => snapshotController.commitSnapshot(req, res));
 
 // Pool endpoints (with admin rate limiting on write operations)
+router.post('/pools/validate', (req, res) => poolController.validatePool(req, res));
 router.post('/pools', adminRateLimiter, (req, res) => poolController.createPool(req, res));
 router.get('/pools', (req, res) => poolController.listPools(req, res));
 router.get('/pools/:id', (req, res) => poolController.getPoolDetails(req, res));
 router.delete('/pools/:id', adminRateLimiter, (req, res) => poolController.cancelPool(req, res));
 router.put('/pools/:id/rules', adminRateLimiter, (req, res) => poolController.updatePoolRule(req, res));
 router.post('/pools/:id/rules', adminRateLimiter, (req, res) => poolController.addRule(req, res));
+router.put('/pools/:id/allocations', adminRateLimiter, (req, res) => poolController.updateAllocations(req, res));
 router.post('/pools/:id/sync', adminRateLimiter, (req, res) => poolController.syncPool(req, res));
 router.get('/pools/:id/streamflow-status', (req, res) => poolController.getStreamflowStatus(req, res));
 router.post('/pools/:id/deploy-streamflow', strictRateLimiter, (req, res) => poolController.deployToStreamflow(req, res));
+router.post('/pools/:id/cancel-streamflow', strictRateLimiter, (req, res) => poolController.cancelStreamflowPool(req, res));
 router.post('/pools/:id/topup', strictRateLimiter, (req, res) => poolController.topupPool(req, res));
 router.get('/pools/:id/activity', (req, res) => poolController.getPoolActivity(req, res));
 router.get('/pools/:id/users/:wallet', (req, res) => poolController.getUserStatus(req, res));

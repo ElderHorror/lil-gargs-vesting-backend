@@ -229,7 +229,7 @@ async function takeSnapshot(pool: SnapshotPool): Promise<void> {
 /**
  * Check for pools that need snapshots
  */
-async function checkPendingSnapshots(): Promise<void> {
+export async function checkPendingSnapshots(): Promise<void> {
   try {
     const now = new Date();
     

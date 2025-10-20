@@ -86,6 +86,74 @@ export class StreamflowService {
   }
 
   /**
+   * Withdraw vested tokens from a Streamflow pool
+   */
+  async withdrawFromPool(streamId: string, adminKeypair: Keypair, amount?: number): Promise<{ signature: string }> {
+    try {
+      console.log('Withdrawing from Streamflow pool:', streamId);
+      
+      const withdrawResult = await this.client.withdraw(
+        { id: streamId, amount: amount ? getBN(amount, 9) : undefined },
+        { invoker: adminKeypair }
+      );
+
+      console.log('Withdrawal successful! Signature:', withdrawResult.txId);
+
+      return {
+        signature: withdrawResult.txId,
+      };
+    } catch (error) {
+      console.error('Failed to withdraw from Streamflow pool:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Cancel a Streamflow vesting pool and reclaim rent
+   * For completed streams, withdraws all tokens first, then cancels
+   */
+  async cancelVestingPool(streamId: string, adminKeypair: Keypair): Promise<{ signature: string; withdrew?: boolean }> {
+    try {
+      console.log('Canceling Streamflow pool:', streamId);
+      
+      // Try to get stream info to check if it's completed
+      let withdrew = false;
+      try {
+        const stream = await this.client.getOne({ id: streamId });
+        if (stream) {
+          const now = Math.floor(Date.now() / 1000);
+          const end = Number(stream.end);
+          
+          // If stream is completed, withdraw first
+          if (now >= end) {
+            console.log('Stream is completed, withdrawing all tokens first...');
+            await this.withdrawFromPool(streamId, adminKeypair);
+            withdrew = true;
+          }
+        }
+      } catch (err) {
+        console.log('Could not check stream status, proceeding with cancel:', err);
+      }
+      
+      const cancelResult = await this.client.cancel(
+        { id: streamId },
+        { invoker: adminKeypair }
+      );
+
+      console.log('Stream canceled! Signature:', cancelResult.txId);
+      console.log('Rent and unvested tokens returned to sender');
+
+      return {
+        signature: cancelResult.txId,
+        withdrew,
+      };
+    } catch (error) {
+      console.error('Failed to cancel Streamflow pool:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Get vested amount from pool at current time
    */
   async getVestedAmount(streamId: string): Promise<number> {
@@ -122,34 +190,6 @@ export class StreamflowService {
     }
   }
 
-  /**
-   * Withdraw vested tokens from pool to admin wallet
-   * Admin then distributes to users who paid the claim fee
-   */
-  async withdrawFromPool(
-    streamId: string,
-    adminKeypair: Keypair,
-    amount: number
-  ): Promise<string> {
-    try {
-      console.log('Withdrawing from Streamflow pool:', streamId);
-      console.log('Amount:', amount);
-
-      const withdrawResult = await this.client.withdraw(
-        {
-          id: streamId,
-          amount: getBN(amount, 9),
-        },
-        { invoker: adminKeypair }
-      );
-
-      console.log('Withdrawal successful! Signature:', withdrawResult.txId);
-      return withdrawResult.txId;
-    } catch (error) {
-      console.error('Failed to withdraw from pool:', error);
-      throw error;
-    }
-  }
 
   /**
    * Get pool status
