@@ -59,21 +59,27 @@ export async function syncDynamicPool(pool: any) {
       const eligibleHolders = holders.filter((h: any) => h.nftCount >= rule.threshold);
       console.log(`  ${eligibleHolders.length} holders meet threshold of ${rule.threshold}`);
       
-      // Calculate allocation per user
-      let allocationPerUser: number;
+      // Calculate total NFTs held by eligible holders (for weighted distribution)
+      const totalNFTs = eligibleHolders.reduce((sum: number, h: any) => sum + h.nftCount, 0);
+      console.log(`  Total NFTs held by eligible holders: ${totalNFTs}`);
+      
+      // Calculate pool share for this rule
+      let poolShare: number;
       if (rule.allocationType === 'PERCENTAGE') {
-        // Percentage of pool divided among eligible users
-        const poolShare = (pool.total_pool_amount * rule.allocationValue) / 100;
-        allocationPerUser = poolShare / eligibleHolders.length;
+        poolShare = (pool.total_pool_amount * rule.allocationValue) / 100;
       } else {
-        // Fixed amount per user
-        allocationPerUser = rule.allocationValue;
+        // Fixed amount total for this rule
+        poolShare = rule.allocationValue;
       }
       
-      console.log(`  Allocation per user: ${allocationPerUser.toFixed(2)} tokens`);
+      console.log(`  Pool share for this rule: ${poolShare.toFixed(2)} tokens`);
+      console.log(`  Using weighted allocation based on NFT count`);
       
-      // Add/update users
+      // Add/update users with weighted allocation
       for (const holder of eligibleHolders) {
+        // Calculate weighted allocation: (holder's NFTs / total NFTs) × pool share
+        const allocationPerUser = (holder.nftCount / totalNFTs) * poolShare;
+        
         // Check if user already has vesting for this pool
         const { data: existing, error: fetchError } = await dbService.supabase
           .from('vestings')
@@ -96,7 +102,7 @@ export async function syncDynamicPool(pool: any) {
           if (updateError) {
             console.error(`  ❌ Failed to update ${holder.wallet}:`, updateError);
           } else {
-            console.log(`  ✅ Updated ${holder.wallet.slice(0, 4)}...${holder.wallet.slice(-4)}: ${allocationPerUser.toFixed(2)} tokens`);
+            console.log(`  ✅ Updated ${holder.wallet.slice(0, 4)}...${holder.wallet.slice(-4)}: ${holder.nftCount} NFTs → ${allocationPerUser.toFixed(2)} tokens`);
           }
         } else {
           // Create new vesting
@@ -116,7 +122,7 @@ export async function syncDynamicPool(pool: any) {
           if (insertError) {
             console.error(`  ❌ Failed to create ${holder.wallet}:`, insertError);
           } else {
-            console.log(`  ✨ Created ${holder.wallet.slice(0, 4)}...${holder.wallet.slice(-4)}: ${allocationPerUser.toFixed(2)} tokens`);
+            console.log(`  ✨ Created ${holder.wallet.slice(0, 4)}...${holder.wallet.slice(-4)}: ${holder.nftCount} NFTs → ${allocationPerUser.toFixed(2)} tokens`);
           }
         }
       }

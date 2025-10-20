@@ -70,7 +70,7 @@ export class SnapshotConfigService {
 
         // Calculate allocations based on type
         if (rule.allocationType === 'FIXED') {
-          // Fixed amount per NFT
+          // Fixed amount per NFT (weighted by NFT count)
           for (const holder of eligible) {
             const amount = holder.nftCount * rule.allocationValue;
             ruleAllocation += amount;
@@ -87,12 +87,15 @@ export class SnapshotConfigService {
             }
           }
         } else {
-          // Percentage share of pool - SPLIT EQUALLY among eligible wallets
+          // Percentage share of pool - WEIGHTED by NFT count
           const poolShare = config.poolSize * (rule.allocationValue / 100);
-          const perWallet = eligible.length > 0 ? poolShare / eligible.length : 0;
+          
+          // Calculate total NFTs for weighted distribution
+          const totalNFTs = eligible.reduce((sum, h) => sum + h.nftCount, 0);
 
           for (const holder of eligible) {
-            const amount = perWallet; // Equal amount per wallet
+            // Weighted allocation: (holder's NFTs / total NFTs) × pool share
+            const amount = totalNFTs > 0 ? (holder.nftCount / totalNFTs) * poolShare : 0;
             ruleAllocation += amount;
 
             const existing = walletAllocations.get(holder.wallet);
