@@ -45,6 +45,14 @@ export class PoolController {
     total_pool_amount: number;
     vesting_mode: string;
     manual_allocations?: Array<{ allocationType: string; allocationValue: number }>;
+    rules?: Array<{ 
+      name: string; 
+      nftContract: string; 
+      threshold: number; 
+      allocationType: string; 
+      allocationValue: number;
+      enabled: boolean;
+    }>;
   }): Promise<ValidationResult> {
     const result: ValidationResult = {
       valid: true,
@@ -178,6 +186,72 @@ export class PoolController {
         }
       }
 
+      // 5. Validate NFT rules (snapshot/dynamic modes)
+      if ((params.vesting_mode === 'snapshot' || params.vesting_mode === 'dynamic') && params.rules) {
+        // Check if at least one rule exists
+        if (params.rules.length === 0) {
+          result.checks.allocations.valid = false;
+          result.checks.allocations.message = 'At least one NFT rule is required for snapshot/dynamic mode';
+          result.errors.push(result.checks.allocations.message);
+          result.valid = false;
+        } else {
+          let totalPercentage = 0;
+          const enabledRules = params.rules.filter(r => r.enabled);
+
+          if (enabledRules.length === 0) {
+            result.warnings.push('No rules are enabled. Pool will have no eligible wallets.');
+          }
+
+          for (const rule of params.rules) {
+            // Validate NFT contract address
+            if (!rule.nftContract || rule.nftContract.length < 32) {
+              result.checks.allocations.valid = false;
+              result.checks.allocations.message = `Invalid NFT contract address in rule "${rule.name}"`;
+              result.errors.push(result.checks.allocations.message);
+              result.valid = false;
+            }
+
+            // Validate threshold
+            if (rule.threshold <= 0) {
+              result.checks.allocations.valid = false;
+              result.checks.allocations.message = `Threshold must be greater than 0 in rule "${rule.name}"`;
+              result.errors.push(result.checks.allocations.message);
+              result.valid = false;
+            }
+
+            // Validate allocation value
+            if (rule.allocationValue <= 0) {
+              result.checks.allocations.valid = false;
+              result.checks.allocations.message = `Allocation value must be greater than 0 in rule "${rule.name}"`;
+              result.errors.push(result.checks.allocations.message);
+              result.valid = false;
+            }
+
+            // Sum up percentages
+            if (rule.allocationType === 'PERCENTAGE') {
+              totalPercentage += rule.allocationValue;
+            }
+          }
+
+          result.checks.allocations.total = totalPercentage;
+
+          // Check if percentages exceed 100%
+          if (totalPercentage > 100) {
+            result.checks.allocations.valid = false;
+            result.checks.allocations.message = `Rule allocations sum to ${totalPercentage.toFixed(2)}%, which exceeds 100%`;
+            result.errors.push(result.checks.allocations.message);
+            result.valid = false;
+          } else if (totalPercentage > 0 && totalPercentage < 100) {
+            const unallocated = 100 - totalPercentage;
+            result.warnings.push(`Rule allocations sum to ${totalPercentage.toFixed(2)}%. ${unallocated.toFixed(2)}% of pool will remain unallocated.`);
+          }
+
+          if (result.checks.allocations.valid && result.checks.allocations.message === '') {
+            result.checks.allocations.message = `${params.rules.length} rule(s) configured (${enabledRules.length} enabled)`;
+          }
+        }
+      }
+
       // Determine if can proceed without Streamflow
       result.canProceedWithoutStreamflow = result.checks.treasury.valid && result.checks.allocations.valid;
 
@@ -195,13 +269,14 @@ export class PoolController {
    */
   async validatePool(req: Request, res: Response) {
     try {
-      const { start_time, total_pool_amount, vesting_mode, manual_allocations } = req.body;
+      const { start_time, total_pool_amount, vesting_mode, manual_allocations, rules } = req.body;
 
       const validation = await this.validatePoolCreation({
         start_time,
         total_pool_amount,
         vesting_mode: vesting_mode || 'snapshot',
         manual_allocations,
+        rules,
       });
 
       res.json(validation);

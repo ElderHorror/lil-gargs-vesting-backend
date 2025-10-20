@@ -10,8 +10,8 @@ export class HeliusNFTService {
 
   constructor(apiKey: string, network: 'devnet' | 'mainnet-beta' = 'devnet') {
     this.apiKey = apiKey;
-    // Use standard Helius RPC endpoints
-    this.baseUrl = `https://${network}.helius-rpc.com/?api-key=${apiKey}`;
+    // Use correct Helius RPC endpoints
+    this.baseUrl = `https://${network === 'mainnet-beta' ? 'mainnet' : network}.helius-rpc.com/?api-key=${apiKey}`;
   }
 
   /**
