@@ -39,6 +39,10 @@ export async function syncDynamicPool(pool: any) {
     console.log(`  Threshold: ${rule.threshold}`);
     console.log(`  Allocation: ${rule.allocationValue} ${rule.allocationType}`);
     
+    let updatedCount = 0;
+    let createdCount = 0;
+    let errorCount = 0;
+    
     try {
       // Validate NFT contract address
       let nftContract: PublicKey;
@@ -95,14 +99,14 @@ export async function syncDynamicPool(pool: any) {
             .update({
               token_amount: allocationPerUser,
               nft_count: holder.nftCount,
-              updated_at: new Date().toISOString(),
             })
             .eq('id', existing.id);
           
           if (updateError) {
             console.error(`  ❌ Failed to update ${holder.wallet}:`, updateError);
+            errorCount++;
           } else {
-            console.log(`  ✅ Updated ${holder.wallet.slice(0, 4)}...${holder.wallet.slice(-4)}: ${holder.nftCount} NFTs → ${allocationPerUser.toFixed(2)} tokens`);
+            updatedCount++;
           }
         } else {
           // Create new vesting
@@ -121,11 +125,15 @@ export async function syncDynamicPool(pool: any) {
           
           if (insertError) {
             console.error(`  ❌ Failed to create ${holder.wallet}:`, insertError);
+            errorCount++;
           } else {
-            console.log(`  ✨ Created ${holder.wallet.slice(0, 4)}...${holder.wallet.slice(-4)}: ${holder.nftCount} NFTs → ${allocationPerUser.toFixed(2)} tokens`);
+            createdCount++;
           }
         }
       }
+      
+      // Summary for this rule
+      console.log(`  📊 Summary: ${updatedCount} updated, ${createdCount} created, ${errorCount} errors`);
     } catch (error) {
       console.error(`  ❌ Error processing rule "${rule.name}":`, error);
     }

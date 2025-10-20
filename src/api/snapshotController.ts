@@ -192,8 +192,7 @@ export class SnapshotController {
               snapshot_locked: true,
               is_active: true,
               is_cancelled: false,
-              last_verified: new Date().toISOString(),
-              created_at: new Date().toISOString(),
+              // last_verified and created_at have DEFAULT values in schema
             });
 
           if (error) {

@@ -50,7 +50,8 @@ export class HeliusNFTService {
         }
 
         const data: any = await response.json();
-        console.log('Helius response:', JSON.stringify(data, null, 2));
+        // Don't log full response - too large for production logs
+        // console.log('Helius response:', JSON.stringify(data, null, 2));
         
         if (data.error) {
           console.error('Helius RPC error:', data.error);
@@ -71,8 +72,6 @@ export class HeliusNFTService {
           }
         }
       }
-
-      console.log(`   Fetched ${allAssets.length} NFTs from collection`);
       
       // Group by owner
       const holderMap = new Map<string, number>();
@@ -82,6 +81,8 @@ export class HeliusNFTService {
           holderMap.set(owner, (holderMap.get(owner) || 0) + 1);
         }
       }
+
+      console.log(`   Fetched ${allAssets.length} NFTs from collection (${holderMap.size} unique holders)`);
 
       // Convert to array
       return Array.from(holderMap.entries()).map(([wallet, nftCount]) => ({
