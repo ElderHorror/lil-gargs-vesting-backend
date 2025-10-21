@@ -32,6 +32,9 @@ export async function syncDynamicPool(pool: any) {
   
   console.log(`Found ${rules.length} active rule(s)`);
   
+  // Track all eligible wallets across all rules
+  const allEligibleWallets = new Set<string>();
+  
   // Process each rule
   for (const rule of activeRules) {
     console.log(`\n📋 Processing rule: ${rule.name}`);
@@ -81,6 +84,9 @@ export async function syncDynamicPool(pool: any) {
       
       // Add/update users with weighted allocation
       for (const holder of eligibleHolders) {
+        // Track this wallet as eligible
+        allEligibleWallets.add(holder.wallet);
+        
         // Calculate weighted allocation: (holder's NFTs / total NFTs) × pool share
         const allocationPerUser = (holder.nftCount / totalNFTs) * poolShare;
         
@@ -93,12 +99,14 @@ export async function syncDynamicPool(pool: any) {
           .maybeSingle();
         
         if (existing) {
-          // Update existing allocation
+          // Update existing allocation (and reactivate if it was cancelled)
           const { error: updateError } = await dbService.supabase
             .from('vestings')
             .update({
               token_amount: allocationPerUser,
               nft_count: holder.nftCount,
+              is_active: true,
+              is_cancelled: false,
             })
             .eq('id', existing.id);
           
@@ -137,6 +145,49 @@ export async function syncDynamicPool(pool: any) {
     } catch (error) {
       console.error(`  ❌ Error processing rule "${rule.name}":`, error);
     }
+  }
+  
+  // Deactivate users who no longer hold NFTs
+  console.log(`\n🔍 Checking for users who no longer meet requirements...`);
+  try {
+    // Get all active vestings for this pool
+    const { data: allVestings, error: fetchError } = await dbService.supabase
+      .from('vestings')
+      .select('*')
+      .eq('vesting_stream_id', pool.id)
+      .eq('is_active', true);
+    
+    if (fetchError) {
+      console.error('  ❌ Failed to fetch existing vestings:', fetchError);
+    } else if (allVestings) {
+      let deactivatedCount = 0;
+      
+      for (const vesting of allVestings) {
+        // If this wallet is not in the eligible list, deactivate it
+        if (!allEligibleWallets.has(vesting.user_wallet)) {
+          const { error: deactivateError } = await dbService.supabase
+            .from('vestings')
+            .update({
+              is_active: false,
+              is_cancelled: true,
+              cancelled_at: new Date().toISOString(),
+              cancellation_reason: 'No longer holds required NFTs',
+            })
+            .eq('id', vesting.id);
+          
+          if (deactivateError) {
+            console.error(`  ❌ Failed to deactivate ${vesting.user_wallet}:`, deactivateError);
+          } else {
+            console.log(`  🗑️  Deactivated ${vesting.user_wallet.slice(0, 4)}...${vesting.user_wallet.slice(-4)} (no longer holds NFTs)`);
+            deactivatedCount++;
+          }
+        }
+      }
+      
+      console.log(`  📊 Deactivated ${deactivatedCount} user(s) who no longer meet requirements`);
+    }
+  } catch (error) {
+    console.error('  ❌ Error checking for removed users:', error);
   }
   
   console.log(`\n✅ Sync completed for pool: ${pool.name}\n`);
