@@ -135,6 +135,7 @@ export async function syncDynamicPool(pool: any) {
             console.error(`  ❌ Failed to create ${holder.wallet}:`, insertError);
             errorCount++;
           } else {
+            console.log(`  ✨ Added ${holder.wallet.slice(0, 4)}...${holder.wallet.slice(-4)}: ${holder.nftCount} NFTs → ${allocationPerUser.toFixed(2)} tokens`);
             createdCount++;
           }
         }
