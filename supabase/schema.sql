@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS vesting_streams (
   vesting_mode TEXT DEFAULT 'snapshot',
   is_active BOOLEAN DEFAULT true,
   require_nft_on_claim BOOLEAN DEFAULT true,
+  state TEXT DEFAULT 'active',
   
   -- Timestamps
   start_time TIMESTAMPTZ,
@@ -59,7 +60,8 @@ CREATE TABLE IF NOT EXISTS vesting_streams (
     vesting_duration_days > 0 AND
     cliff_duration_days >= 0 AND
     grace_period_days >= 0
-  )
+  ),
+  CONSTRAINT valid_state CHECK (state IN ('active', 'paused', 'cancelled'))
 );
 
 -- Vestings table (individual user vestings)

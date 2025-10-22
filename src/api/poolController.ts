@@ -580,6 +580,7 @@ export class PoolController {
           endTime: stream.end_time,
           streamflowId: stream.streamflow_stream_id,
           vestingMode: stream.vesting_mode,
+          state: stream.state || 'active',
           createdAt: stream.created_at,
           stats: {
             userCount,
@@ -635,6 +636,7 @@ export class PoolController {
         nftRequirements: stream.nft_requirements || [],
         tierAllocations: stream.tier_allocations || {},
         vestingMode: stream.vesting_mode,
+        state: stream.state || 'active',
       });
     } catch (error) {
       console.error('Failed to get pool details:', error);

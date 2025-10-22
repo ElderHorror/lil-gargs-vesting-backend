@@ -1,135 +1,92 @@
-import express from 'express';
-import { SnapshotController } from './snapshotController';
+// Import controllers
+import { Router } from 'express';
 import { PoolController } from './poolController';
-import { ConfigController } from './configController';
-import { ClaimsController } from './claimsController';
-import { MetricsController } from './metricsController';
-import { StreamController } from './streamController';
+import { AdminController } from './adminController';
 import { UserVestingController } from './userVestingController';
-import { TreasuryController } from './treasuryController';
+import { ConfigController } from './configController';
 import { AdminLogsController } from './adminLogsController';
+import { ClaimsController } from './claimsController';
 import { CronController } from './cronController';
-import { adminRateLimiter, strictRateLimiter } from '../middleware/rateLimiter';
+import { MetricsController } from './metricsController';
+import { SnapshotController } from './snapshotController';
+import { StreamController } from './streamController';
+import { TreasuryController } from './treasuryController';
+import { requireAdmin } from '../middleware/adminAuth';
 
-const router = express.Router();
-const snapshotController = new SnapshotController();
+const router = Router();
 const poolController = new PoolController();
-const configController = new ConfigController();
-const claimsController = new ClaimsController();
-const metricsController = new MetricsController();
-const streamController = new StreamController();
+const adminController = new AdminController();
 const userVestingController = new UserVestingController();
-const treasuryController = new TreasuryController();
+const configController = new ConfigController();
 const adminLogsController = new AdminLogsController();
+const claimsController = new ClaimsController();
 const cronController = new CronController();
+const metricsController = new MetricsController();
+const snapshotController = new SnapshotController();
+const streamController = new StreamController();
+const treasuryController = new TreasuryController();
 
-// ============================================================================
-// ADMIN ROUTES - Protected by frontend page-level auth
-// ============================================================================
+// Pool routes
+router.get('/pools', poolController.listPools.bind(poolController));
+router.get('/pools/:id', poolController.getPoolDetails.bind(poolController));
+router.get('/pools/:id/activity', poolController.getPoolActivity.bind(poolController));
+router.get('/pools/:id/users/:wallet', poolController.getUserStatus.bind(poolController));
+router.get('/pools/:id/streamflow-status', poolController.getStreamflowStatus.bind(poolController));
 
-// Snapshot endpoints
-router.post('/snapshot/holders', (req, res) => snapshotController.getHolders(req, res));
-router.post('/snapshot/collection-stats', (req, res) => snapshotController.getCollectionStats(req, res));
-router.post('/snapshot/preview-rule', (req, res) => snapshotController.previewRule(req, res));
-router.post('/snapshot/calculate-summary', (req, res) => snapshotController.calculateSummary(req, res));
-router.post('/snapshot/process', (req, res) => snapshotController.processSnapshot(req, res));
-router.post('/snapshot/commit', (req, res) => snapshotController.commitSnapshot(req, res));
+// Config routes
+router.get('/config/check-admin', configController.checkAdmin.bind(configController));
+router.get('/config/claim-policy', configController.getClaimPolicy.bind(configController));
+router.put('/config/claim-policy', configController.updateClaimPolicy.bind(configController));
 
-// Pool endpoints (with admin rate limiting on write operations)
-router.post('/pools/validate', (req, res) => poolController.validatePool(req, res));
-router.post('/pools', adminRateLimiter, (req, res) => poolController.createPool(req, res));
-router.get('/pools', (req, res) => poolController.listPools(req, res));
-router.get('/pools/:id', (req, res) => poolController.getPoolDetails(req, res));
-router.delete('/pools/:id', adminRateLimiter, (req, res) => poolController.cancelPool(req, res));
-router.put('/pools/:id/rules', adminRateLimiter, (req, res) => poolController.updatePoolRule(req, res));
-router.post('/pools/:id/rules', adminRateLimiter, (req, res) => poolController.addRule(req, res));
-router.put('/pools/:id/allocations', adminRateLimiter, (req, res) => poolController.updateAllocations(req, res));
-router.post('/pools/:id/sync', adminRateLimiter, (req, res) => poolController.syncPool(req, res));
-router.get('/pools/:id/streamflow-status', (req, res) => poolController.getStreamflowStatus(req, res));
-router.post('/pools/:id/deploy-streamflow', strictRateLimiter, (req, res) => poolController.deployToStreamflow(req, res));
-router.post('/pools/:id/cancel-streamflow', strictRateLimiter, (req, res) => poolController.cancelStreamflowPool(req, res));
-router.post('/pools/:id/topup', strictRateLimiter, (req, res) => poolController.topupPool(req, res));
-router.get('/pools/:id/activity', (req, res) => poolController.getPoolActivity(req, res));
-router.get('/pools/:id/users/:wallet', (req, res) => poolController.getUserStatus(req, res));
+// User vesting routes
+router.get('/user/vesting/list', userVestingController.listUserVestings.bind(userVestingController));
+router.get('/user/vesting/summary', userVestingController.getVestingSummary.bind(userVestingController));
+router.get('/user/vesting/history', userVestingController.getClaimHistory.bind(userVestingController));
+router.post('/user/vesting/claim', userVestingController.claimVesting.bind(userVestingController));
+router.post('/user/vesting/complete-claim', userVestingController.completeClaimWithFee.bind(userVestingController));
 
-// Config endpoints
-router.get('/config', (req, res) => configController.getConfig(req, res));
-router.put('/config', (req, res) => configController.updateConfig(req, res));
-router.get('/config/mode', (req, res) => configController.getMode(req, res));
+// Admin logs routes
+router.get('/admin-logs', adminLogsController.getAdminLogs.bind(adminLogsController));
+router.post('/admin-logs', adminLogsController.createAdminLog.bind(adminLogsController));
 
-// Price endpoints
-router.get('/price/sol', async (req, res) => {
-  try {
-    const { PriceService } = await import('../services/priceService');
-    const { getConnection } = await import('../config');
-    const connection = getConnection();
-    const priceService = new PriceService(connection, 'mainnet-beta');
-    const solPrice = await priceService.getSolPrice();
-    
-    res.json({
-      success: true,
-      data: {
-        price: solPrice,
-        currency: 'USD',
-        timestamp: new Date().toISOString(),
-      },
-    });
-  } catch (error) {
-    res.status(500).json({
-      error: error instanceof Error ? error.message : 'Failed to fetch price',
-    });
-  }
-});
-router.put('/config/mode', (req, res) => configController.switchMode(req, res));
-router.get('/config/claim-policy', (req, res) => configController.getClaimPolicy(req, res));
-router.put('/config/claim-policy', (req, res) => configController.updateClaimPolicy(req, res));
-router.get('/integrations/status', (req, res) => configController.getIntegrationStatus(req, res));
+// Claims routes
+router.get('/claims', claimsController.listClaims.bind(claimsController));
+router.get('/claims/stats', claimsController.getClaimStats.bind(claimsController));
+router.get('/claims/:id', claimsController.getClaimDetails.bind(claimsController));
+router.post('/claims/:id/flag', claimsController.flagClaim.bind(claimsController));
+router.get('/claims/wallet/:wallet', claimsController.getWalletClaims.bind(claimsController));
 
-// Claims endpoints
-router.get('/claims', (req, res) => claimsController.listClaims(req, res));
-router.get('/claims/stats', (req, res) => claimsController.getClaimStats(req, res));
-router.get('/claims/:id', (req, res) => claimsController.getClaimDetails(req, res));
-router.post('/claims/:id/flag', (req, res) => claimsController.flagClaim(req, res));
-router.get('/claims/wallet/:wallet', (req, res) => claimsController.getWalletClaims(req, res));
+// Cron routes
+router.post('/cron/snapshot', cronController.triggerSnapshotCheck.bind(cronController));
+router.post('/cron/sync-dynamic', cronController.triggerDynamicSync.bind(cronController));
+router.get('/cron/health', cronController.healthCheck.bind(cronController));
 
-// Metrics endpoints
-router.get('/metrics/dashboard', (req, res) => metricsController.getDashboardMetrics(req, res));
-router.get('/metrics/pool-balance', (req, res) => metricsController.getPoolBalanceEndpoint(req, res));
-router.get('/metrics/eligible-wallets', (req, res) => metricsController.getEligibleWalletsEndpoint(req, res));
-router.get('/metrics/activity-log', (req, res) => metricsController.getActivityLog(req, res));
+// Metrics routes
+router.get('/metrics/dashboard', metricsController.getDashboardMetrics.bind(metricsController));
+router.get('/metrics/pool-balance', metricsController.getPoolBalanceEndpoint.bind(metricsController));
+router.get('/metrics/eligible-wallets', metricsController.getEligibleWalletsEndpoint.bind(metricsController));
+router.get('/metrics/activity-log', metricsController.getActivityLog.bind(metricsController));
 
-// Stream management endpoints
-router.post('/streams/pause-all', (req, res) => streamController.pauseAllStreams(req, res));
-router.post('/streams/emergency-stop', (req, res) => streamController.emergencyStopAllStreams(req, res));
-router.post('/streams/resume-all', (req, res) => streamController.resumeAllStreams(req, res));
+// Snapshot routes
+router.get('/snapshot/holders', snapshotController.getHolders.bind(snapshotController));
+router.post('/snapshot/collection-stats', snapshotController.getCollectionStats.bind(snapshotController));
+router.post('/snapshot/preview-rule', snapshotController.previewRule.bind(snapshotController));
+router.post('/snapshot/calculate-summary', snapshotController.calculateSummary.bind(snapshotController));
+router.post('/snapshot/process', snapshotController.processSnapshot.bind(snapshotController));
+router.post('/snapshot/commit', snapshotController.commitSnapshot.bind(snapshotController));
 
-// Treasury endpoints
-router.get('/treasury/status', (req, res) => treasuryController.getTreasuryStatus(req, res));
-router.get('/treasury/pools', (req, res) => treasuryController.getPoolBreakdown(req, res));
+// Stream routes
+router.post('/stream/pause-all', streamController.pauseAllStreams.bind(streamController));
+router.post('/stream/emergency-stop', streamController.emergencyStopAllStreams.bind(streamController));
+router.post('/stream/resume-all', streamController.resumeAllStreams.bind(streamController));
 
-// Admin logs endpoints
-router.get('/admin-logs', (req, res) => adminLogsController.getAdminLogs(req, res));
-router.post('/admin-logs', (req, res) => adminLogsController.createAdminLog(req, res));
+// Treasury routes
+router.get('/treasury/status', treasuryController.getTreasuryStatus.bind(treasuryController));
+router.get('/treasury/pools', treasuryController.getPoolBreakdown.bind(treasuryController));
 
-// ============================================================================
-// PUBLIC ROUTES - No authentication required
-// ============================================================================
-
-// Admin check endpoint (public, just checks if wallet is admin)
-router.get('/config/check-admin', (req, res) => configController.checkAdmin(req, res));
-
-// User vesting endpoints
-router.get('/user/vesting/list', (req, res) => userVestingController.listUserVestings(req, res));
-router.get('/user/vesting/summary', (req, res) => userVestingController.getVestingSummary(req, res));
-router.post('/user/vesting/claim', (req, res) => userVestingController.claimVesting(req, res));
-router.post('/user/vesting/complete-claim', (req, res) => userVestingController.completeClaimWithFee(req, res));
-router.get('/user/vesting/claim-history', (req, res) => userVestingController.getClaimHistory(req, res));
-
-// ============================================================================
-// CRON ROUTES - For external cron services (secured with CRON_SECRET)
-// ============================================================================
-router.get('/cron/health', (req, res) => cronController.healthCheck(req, res));
-router.post('/cron/snapshot', (req, res) => cronController.triggerSnapshotCheck(req, res));
-router.post('/cron/sync-dynamic', (req, res) => cronController.triggerDynamicSync(req, res));
+// Admin routes (admin dashboard handles authentication)
+router.get('/admin/pool/:poolId/members', adminController.getPoolMembers.bind(adminController));
+router.patch('/admin/pool/:poolId/member/:wallet', adminController.updatePoolMember.bind(adminController));
+router.patch('/admin/pool/:poolId/state', adminController.updatePoolState.bind(adminController));
 
 export default router;

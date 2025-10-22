@@ -8,8 +8,14 @@ import { PublicKey } from '@solana/web3.js';
  * 
  * Usage:
  * import { createClient } from '@supabase/supabase-js';
- * const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
- * const service = new SupabaseService(supabase);
+ * import { SupabaseService } from './services/supabaseService';
+ * 
+ * const supabase = createClient(
+ *   process.env.SUPABASE_URL!,
+ *   process.env.SUPABASE_SERVICE_ROLE_KEY!
+ * );
+ * 
+ * const dbService = new SupabaseService(supabase);
  */
 
 // Database types
@@ -97,6 +103,13 @@ export interface UpdateVestingInput {
   is_cancelled?: boolean;
   last_verified?: string;
   cancelled_at?: string;
+  token_amount?: number;
+  tier?: number;
+  vesting_mode?: string;
+  snapshot_locked?: boolean;
+  claim_verification_enabled?: boolean;
+  grace_period_end?: string;
+  cancellation_reason?: string;
 }
 
 export interface CreateClaimInput {
@@ -394,37 +407,65 @@ export class SupabaseService {
       await this.updateVesting(user_wallet, vestingUpdates);
     }
   }
-}
 
-/**
- * Example usage:
- * 
- * import { createClient } from '@supabase/supabase-js';
- * import { SupabaseService } from './services/supabaseService';
- * 
- * const supabase = createClient(
- *   process.env.SUPABASE_URL!,
- *   process.env.SUPABASE_SERVICE_ROLE_KEY!
- * );
- * 
- * const dbService = new SupabaseService(supabase);
- * 
- * // Get config
- * const config = await dbService.getConfig();
- * 
- * // Create vesting
- * await dbService.createVesting({
- *   user_wallet: 'wallet123...',
- *   nft_count: 25,
- *   streamflow_stream_id: 'stream123...',
- *   token_amount: 1000000000000,
- * });
- * 
- * // Log admin action
- * await dbService.logAdminAction({
- *   action: 'create_vesting',
- *   admin_wallet: 'admin123...',
- *   target_wallet: 'user123...',
- *   details: { amount: 1000 },
- * });
- */
+  // Pool management operations
+  async getPoolMembers(poolId: string): Promise<DatabaseVesting[]> {
+    const { data, error } = await this.supabase
+      .from('vestings')
+      .select('*')
+      .eq('vesting_stream_id', poolId)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    return data || [];
+  }
+
+  async updatePoolMember(
+    poolId: string,
+    userWallet: string,
+    updates: UpdateVestingInput
+  ): Promise<void> {
+    const { error } = await this.supabase
+      .from('vestings')
+      .update(updates)
+      .eq('vesting_stream_id', poolId)
+      .eq('user_wallet', userWallet);
+
+    if (error) throw error;
+  }
+
+  async removePoolMember(poolId: string, userWallet: string): Promise<void> {
+    const { error } = await this.supabase
+      .from('vestings')
+      .update({ 
+        is_active: false, 
+        is_cancelled: true,
+        cancellation_reason: 'Removed by admin'
+      })
+      .eq('vesting_stream_id', poolId)
+      .eq('user_wallet', userWallet);
+
+    if (error) throw error;
+  }
+
+  // Pool state management operations
+  async getPoolState(poolId: string): Promise<{ state: string }> {
+    const { data, error } = await this.supabase
+      .from('vesting_streams')
+      .select('state')
+      .eq('id', poolId)
+      .single();
+
+    if (error) throw error;
+    return data || { state: 'active' };
+  }
+
+  async updatePoolState(poolId: string, state: string): Promise<void> {
+    const { error } = await this.supabase
+      .from('vesting_streams')
+      .update({ state })
+      .eq('id', poolId);
+
+    if (error) throw error;
+  }
+}

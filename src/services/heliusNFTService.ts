@@ -15,6 +15,33 @@ export class HeliusNFTService {
   }
 
   /**
+   * Retry helper with exponential backoff
+   */
+  private async retryWithBackoff<T>(
+    fn: () => Promise<T>,
+    maxRetries: number = 3,
+    initialDelay: number = 1000
+  ): Promise<T> {
+    let lastError: Error | null = null;
+    
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        return await fn();
+      } catch (error) {
+        lastError = error as Error;
+        
+        if (attempt < maxRetries - 1) {
+          const delay = initialDelay * Math.pow(2, attempt);
+          console.log(`  ⏳ Retry attempt ${attempt + 1}/${maxRetries} after ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+    }
+    
+    throw lastError;
+  }
+
+  /**
    * Get all holders of an NFT collection
    */
   async getAllHolders(collectionAddress: PublicKey): Promise<Array<{ wallet: string; nftCount: number }>> {
@@ -25,23 +52,25 @@ export class HeliusNFTService {
 
       // Fetch all pages using Helius DAS API
       while (hasMore) {
-        const response = await fetch(this.baseUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            jsonrpc: '2.0',
-            id: `get-assets-page-${page}`,
-            method: 'getAssetsByGroup',
-            params: {
-              groupKey: 'collection',
-              groupValue: collectionAddress.toBase58(),
-              page: page,
-              limit: 1000,
+        const response = await this.retryWithBackoff(async () => {
+          return await fetch(this.baseUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
             },
-          }),
-        });
+            body: JSON.stringify({
+              jsonrpc: '2.0',
+              id: `get-assets-page-${page}`,
+              method: 'getAssetsByGroup',
+              params: {
+                groupKey: 'collection',
+                groupValue: collectionAddress.toBase58(),
+                page: page,
+                limit: 1000,
+              },
+            }),
+          });
+        }, 3, 2000); // 3 retries, starting with 2 second delay
 
         if (!response.ok) {
           const errorText = await response.text();

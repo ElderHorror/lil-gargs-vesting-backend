@@ -5,16 +5,48 @@ import * as dotenv from 'dotenv';
 
 dotenv.config();
 
-const POOL_ID = '405a07a0-7a04-4f02-8a72-270e6a81defb';
+// Get pool ID from command line argument or use default
+const POOL_ID = process.argv[2] || '405a07a0-7a04-4f02-8a72-270e6a81defb';
 
 async function processSnapshotForPool() {
-  console.log('🔄 Processing snapshot for pool:', POOL_ID);
-  
   // Initialize Supabase
   const supabase = createClient(
     process.env.SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
+
+  // If no pool ID provided, list all pools
+  if (!process.argv[2]) {
+    console.log('📋 Listing all snapshot pools:\n');
+    const { data: pools, error: listError } = await supabase
+      .from('vesting_streams')
+      .select('id, name, vesting_mode, total_pool_amount, created_at')
+      .eq('vesting_mode', 'snapshot')
+      .order('created_at', { ascending: false });
+
+    if (listError) {
+      console.error('❌ Failed to list pools:', listError);
+      return;
+    }
+
+    if (!pools || pools.length === 0) {
+      console.log('No snapshot pools found.');
+      return;
+    }
+
+    pools.forEach((p: any, i: number) => {
+      console.log(`${i + 1}. ${p.name}`);
+      console.log(`   ID: ${p.id}`);
+      console.log(`   Amount: ${p.total_pool_amount}`);
+      console.log(`   Created: ${new Date(p.created_at).toLocaleString()}\n`);
+    });
+
+    console.log('💡 To process a pool, run:');
+    console.log('   npm run snapshot:process-pool <POOL_ID>');
+    return;
+  }
+
+  console.log('🔄 Processing snapshot for pool:', POOL_ID);
 
   // Get pool details
   const { data: pool, error: poolError } = await supabase
@@ -25,6 +57,8 @@ async function processSnapshotForPool() {
 
   if (poolError || !pool) {
     console.error('❌ Failed to fetch pool:', poolError);
+    console.log('\n💡 Run without arguments to list all pools:');
+    console.log('   npm run snapshot:process-pool');
     return;
   }
 
@@ -54,26 +88,46 @@ async function processSnapshotForPool() {
 
   // Process each rule
   for (const rule of rules) {
-    if (!rule.enabled) {
-      console.log(`⏭️  Skipping disabled rule: ${rule.name}`);
+    // Normalize rule format (handle both old and new formats)
+    const normalizedRule = {
+      name: rule.name,
+      nftContract: rule.nftContract || rule.collection,
+      threshold: rule.threshold || rule.min_nfts || 1,
+      allocationType: rule.allocationType,
+      allocationValue: rule.allocationValue,
+      enabled: rule.enabled !== false, // Default to true if not specified
+    };
+
+    if (!normalizedRule.enabled) {
+      console.log(`⏭️  Skipping disabled rule: ${normalizedRule.name}`);
       continue;
     }
 
-    console.log(`\n📋 Processing rule: ${rule.name}`);
-    console.log(`  Contract: ${rule.nftContract}`);
-    console.log(`  Threshold: ${rule.threshold}`);
-    console.log(`  Allocation: ${rule.allocationValue} ${rule.allocationType}`);
+    console.log(`\n📋 Processing rule: ${normalizedRule.name}`);
+    console.log(`  Contract: ${normalizedRule.nftContract}`);
+    console.log(`  Threshold: ${normalizedRule.threshold}`);
+    console.log(`  Allocation: ${normalizedRule.allocationValue} ${normalizedRule.allocationType}`);
 
     try {
-      // Get NFT holders
-      const nftContract = new PublicKey(rule.nftContract);
-      const holders = await heliusService.getAllHolders(nftContract);
+      // Get NFT holders with retry logic
+      console.log(`  🔍 Fetching NFT holders from Helius...`);
+      const nftContract = new PublicKey(normalizedRule.nftContract);
       
-      console.log(`  Found ${holders.length} total holders`);
+      let holders;
+      try {
+        holders = await heliusService.getAllHolders(nftContract);
+      } catch (heliusError) {
+        console.error(`  ❌ Failed to fetch holders from Helius:`, heliusError);
+        console.log(`  ⚠️ Skipping rule "${normalizedRule.name}" due to Helius API error`);
+        console.log(`  💡 Try again later or check your Helius API key and network connection`);
+        continue;
+      }
+      
+      console.log(`  ✅ Found ${holders.length} total holders`);
 
       // Filter by threshold
-      const eligible = holders.filter(h => h.nftCount >= rule.threshold);
-      console.log(`  ${eligible.length} holders meet threshold`);
+      const eligible = holders.filter(h => h.nftCount >= normalizedRule.threshold);
+      console.log(`  📊 ${eligible.length} holders meet threshold of ${normalizedRule.threshold}`);
 
       if (eligible.length === 0) {
         console.log(`  ⚠️ No eligible holders for this rule`);
@@ -86,10 +140,10 @@ async function processSnapshotForPool() {
 
       // Calculate pool share for this rule
       let poolShare: number;
-      if (rule.allocationType === 'PERCENTAGE') {
-        poolShare = (pool.total_pool_amount * rule.allocationValue) / 100;
+      if (normalizedRule.allocationType === 'PERCENTAGE') {
+        poolShare = (pool.total_pool_amount * normalizedRule.allocationValue) / 100;
       } else {
-        poolShare = rule.allocationValue * totalNFTs; // Fixed amount per NFT
+        poolShare = normalizedRule.allocationValue * totalNFTs; // Fixed amount per NFT
       }
 
       console.log(`  Pool share: ${poolShare.toFixed(2)} tokens`);
@@ -98,24 +152,24 @@ async function processSnapshotForPool() {
       for (const holder of eligible) {
         let amount: number;
         
-        if (rule.allocationType === 'PERCENTAGE') {
+        if (normalizedRule.allocationType === 'PERCENTAGE') {
           // Weighted allocation: (holder's NFTs / total NFTs) × pool share
           amount = (holder.nftCount / totalNFTs) * poolShare;
         } else {
           // Fixed amount per NFT
-          amount = holder.nftCount * rule.allocationValue;
+          amount = holder.nftCount * normalizedRule.allocationValue;
         }
 
         const existing = walletAllocations.get(holder.wallet);
         if (existing) {
           existing.total += amount;
           existing.nftCount += holder.nftCount;
-          existing.sources.push({ ruleName: rule.name, amount });
+          existing.sources.push({ ruleName: normalizedRule.name, amount });
         } else {
           walletAllocations.set(holder.wallet, {
             total: amount,
             nftCount: holder.nftCount,
-            sources: [{ ruleName: rule.name, amount }],
+            sources: [{ ruleName: normalizedRule.name, amount }],
           });
         }
       }

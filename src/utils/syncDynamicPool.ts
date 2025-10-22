@@ -56,11 +56,22 @@ export async function syncDynamicPool(pool: any) {
         continue;
       }
       
-      // Get NFT holders using Helius
+      // Get NFT holders using Helius with retry logic
+      console.log(`  🔍 Fetching NFT holders from Helius...`);
       const heliusService = new HeliusNFTService(config.heliusApiKey, 'mainnet-beta');
-      const holders = await heliusService.getAllHolders(nftContract);
       
-      console.log(`  Found ${holders.length} total holders`);
+      let holders;
+      try {
+        holders = await heliusService.getAllHolders(nftContract);
+      } catch (heliusError) {
+        console.error(`  ❌ Failed to fetch holders from Helius:`, heliusError);
+        console.log(`  ⚠️ Skipping rule "${rule.name}" due to Helius API error`);
+        console.log(`  💡 The sync will retry on the next scheduled run`);
+        errorCount++;
+        continue;
+      }
+      
+      console.log(`  ✅ Found ${holders.length} total holders`);
       
       // Filter by threshold
       const eligibleHolders = holders.filter((h: any) => h.nftCount >= rule.threshold);

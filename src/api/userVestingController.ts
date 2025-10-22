@@ -50,7 +50,7 @@ export class UserVestingController {
         return res.json({ success: true, vestings: [] });
       }
 
-      // Filter out vestings with missing pool data or pools that haven't started yet
+      // Filter out vestings with missing pool data, cancelled pools, or pools that haven't started yet
       const now = new Date();
       const startedVestings = vestings.filter((v: any) => {
         // Skip if pool data is missing (orphaned vesting record)
@@ -59,12 +59,18 @@ export class UserVestingController {
           return false;
         }
         
+        // Skip if pool is cancelled
+        if (v.vesting_streams.state === 'cancelled') {
+          console.log(`⚠️ Vesting ${v.id} is in a cancelled pool, skipping`);
+          return false;
+        }
+        
         // Skip if pool hasn't started yet
         const startTime = new Date(v.vesting_streams.start_time);
         return startTime <= now;
       });
 
-      // Return simplified list
+      // Return simplified list with pool state information
       const vestingList = startedVestings.map((v: any) => ({
         id: v.id,
         poolId: v.vesting_stream_id,
@@ -73,6 +79,7 @@ export class UserVestingController {
         tokenAmount: v.token_amount,
         nftCount: v.nft_count,
         streamflowId: v.vesting_streams.streamflow_stream_id,
+        poolState: v.vesting_streams.state || 'active', // Include pool state
         createdAt: v.created_at,
       }));
 
@@ -155,12 +162,20 @@ export class UserVestingController {
         return res.status(404).json({ error: 'No active vesting found for this wallet' });
       }
 
-      // Filter out vestings with missing pool data (orphaned records)
+      // Filter out vestings with missing pool data, cancelled pools
       const validVestings = vestings.filter((v: any) => {
+        // Skip if pool data is missing (orphaned vesting record)
         if (!v.vesting_streams) {
           console.warn(`⚠️ Vesting ${v.id} has no associated pool (orphaned record)`);
           return false;
         }
+        
+        // Skip if pool is cancelled
+        if (v.vesting_streams.state === 'cancelled') {
+          console.log(`⚠️ Vesting ${v.id} is in a cancelled pool, skipping`);
+          return false;
+        }
+        
         return true;
       });
 
@@ -184,15 +199,19 @@ export class UserVestingController {
 
       const stream = vesting.vesting_streams;
       
+      // Check if pool is paused
+      const isPoolPaused = stream.state === 'paused';
+      
       if (validVestings.length > 1) {
         console.log(`[SUMMARY] ⚠️ User has ${validVestings.length} active vesting(s), showing pool: ${vesting.vesting_mode} "${stream.name}"`);
         console.log('[SUMMARY] Pools:', validVestings.map((v: any) => ({
           mode: v.vesting_mode,
           pool: v.vesting_streams?.name,
           id: v.vesting_stream_id,
+          state: v.vesting_streams?.state || 'active'
         })));
       } else {
-        console.log(`[SUMMARY] User has 1 active vesting: ${vesting.vesting_mode} pool "${stream.name}"`);
+        console.log(`[SUMMARY] User has 1 active vesting: ${vesting.vesting_mode} pool "${stream.name}" (state: ${stream.state || 'active'})`);
       }
 
       // Get user's claim history for THIS specific vesting only
@@ -261,6 +280,7 @@ export class UserVestingController {
         data: {
           poolId: vesting.vesting_stream_id,
           poolTotal,
+          poolState: stream.state || 'active', // Include pool state
           distributionType: 'Based on NFT Holdings (%)',
           userShare: {
             percentage: sharePercentage,
@@ -284,6 +304,7 @@ export class UserVestingController {
           tier: vesting.tier || 0,
           eligible: vesting.is_active && !vesting.is_cancelled,
           claimsEnabled, // Add this flag so frontend knows if claims are disabled
+          poolPaused: isPoolPaused, // Explicit flag for paused state
           streamflow: {
             deployed: !!stream.streamflow_stream_id,
             streamId: stream.streamflow_stream_id || null,
@@ -343,28 +364,45 @@ export class UserVestingController {
         }
       }
 
-      // Get claim history from database
-      const history = await this.dbService.getClaimHistory(wallet);
+      // Get claim history from database with vesting information
+      const { data: historyWithVestings, error: historyError } = await this.dbService.supabase
+        .from('claims')
+        .select(`
+          *,
+          vestings (
+            id,
+            user_wallet,
+            token_amount,
+            vesting_stream_id,
+            vesting_streams (id, name, state)
+          )
+        `)
+        .eq('user_wallet', wallet)
+        .order('claimed_at', { ascending: false });
+
+      if (historyError) {
+        throw historyError;
+      }
 
       // Format history for frontend (convert from base units to human-readable)
       const TOKEN_DECIMALS = 9;
       const TOKEN_DIVISOR = Math.pow(10, TOKEN_DECIMALS);
       
-      const formattedHistory = history.map((claim) => ({
+      const formattedHistory = historyWithVestings.map((claim: any) => ({
         id: claim.id,
         date: claim.claimed_at,
         amount: Number(claim.amount_claimed) / TOKEN_DIVISOR,
         feePaid: Number(claim.fee_paid),
         transactionSignature: claim.transaction_signature,
         status: 'Claimed', // All records in history are claimed
+        vestingId: claim.vestings?.id || null,
+        poolName: claim.vestings?.vesting_streams?.name || 'Unknown Pool',
+        poolState: claim.vestings?.vesting_streams?.state || 'active',
       }));
 
       res.json({
         success: true,
-        data: formattedHistory.map((claim) => ({
-          ...claim,
-          vestingId: history.find(ch => ch.id === claim.id)?.vesting_id || null,
-        })),
+        data: formattedHistory,
       });
     } catch (error) {
       console.error('Failed to get claim history:', error);
@@ -445,6 +483,21 @@ export class UserVestingController {
 
       if (!stream) {
         return res.status(404).json({ error: 'Vesting stream not found' });
+      }
+
+      // Check pool state - prevent claims on paused or cancelled pools
+      if (stream.state === 'paused') {
+        return res.status(403).json({ 
+          error: 'This vesting pool is currently paused by the administrator. Claims are temporarily disabled.',
+          poolState: 'paused'
+        });
+      }
+      
+      if (stream.state === 'cancelled') {
+        return res.status(403).json({ 
+          error: 'This vesting pool has been cancelled by the administrator. No further claims are allowed.',
+          poolState: 'cancelled'
+        });
       }
 
       // Validate NFT ownership (check if user still meets requirements)

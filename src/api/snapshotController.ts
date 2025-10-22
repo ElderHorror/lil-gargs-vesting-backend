@@ -35,9 +35,18 @@ export class SnapshotController {
         return res.status(400).json({ error: 'contractAddress is required' });
       }
 
-      const holders = await this.heliusService.getAllHolders(
-        new PublicKey(contractAddress)
-      );
+      let holders;
+      try {
+        holders = await this.heliusService.getAllHolders(
+          new PublicKey(contractAddress)
+        );
+      } catch (heliusError) {
+        console.error('Failed to fetch holders from Helius:', heliusError);
+        return res.status(503).json({
+          error: 'Failed to fetch NFT holders from Helius. Please try again.',
+          details: heliusError instanceof Error ? heliusError.message : 'Unknown error',
+        });
+      }
 
       res.json({
         holders: holders.map((h) => ({
@@ -65,9 +74,18 @@ export class SnapshotController {
         return res.status(400).json({ error: 'contractAddress is required' });
       }
 
-      const holders = await this.heliusService.getAllHolders(
-        new PublicKey(contractAddress)
-      );
+      let holders;
+      try {
+        holders = await this.heliusService.getAllHolders(
+          new PublicKey(contractAddress)
+        );
+      } catch (heliusError) {
+        console.error('Failed to fetch collection stats from Helius:', heliusError);
+        return res.status(503).json({
+          error: 'Failed to fetch NFT collection data from Helius. Please try again.',
+          details: heliusError instanceof Error ? heliusError.message : 'Unknown error',
+        });
+      }
 
       res.json({
         totalSupply: holders.reduce((sum, h) => sum + h.nftCount, 0),

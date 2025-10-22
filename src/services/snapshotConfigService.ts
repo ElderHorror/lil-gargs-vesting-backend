@@ -59,8 +59,15 @@ export class SnapshotConfigService {
           continue;
         }
 
-        // Query Helius for holders
-        const holders = await this.heliusService.getAllHolders(contractPubkey);
+        // Query Helius for holders with retry logic
+        let holders;
+        try {
+          holders = await this.heliusService.getAllHolders(contractPubkey);
+        } catch (heliusError) {
+          console.error(`Failed to fetch holders for rule "${rule.name}":`, heliusError);
+          result.errors.push(`Rule "${rule.name}": Failed to fetch NFT holders from Helius. Please try again.`);
+          continue;
+        }
 
         // Filter by threshold
         const eligible = holders.filter((h) => h.nftCount >= rule.threshold);
@@ -158,9 +165,15 @@ export class SnapshotConfigService {
     totalNfts: number;
     estimatedAllocation: number;
   }> {
-    const holders = await this.heliusService.getAllHolders(
-      new PublicKey(rule.nftContract)
-    );
+    let holders;
+    try {
+      holders = await this.heliusService.getAllHolders(
+        new PublicKey(rule.nftContract)
+      );
+    } catch (heliusError) {
+      console.error(`Failed to fetch holders for preview:`, heliusError);
+      throw new Error(`Failed to fetch NFT holders from Helius. Please try again.`);
+    }
 
     const eligible = holders.filter((h) => h.nftCount >= rule.threshold);
     const totalNfts = eligible.reduce((sum, h) => sum + h.nftCount, 0);
@@ -226,7 +239,14 @@ export class SnapshotConfigService {
         continue;
       }
 
-      const holders = await this.heliusService.getAllHolders(contractPubkey);
+      let holders;
+      try {
+        holders = await this.heliusService.getAllHolders(contractPubkey);
+      } catch (heliusError) {
+        console.error(`Failed to fetch holders for rule "${rule.name}":`, heliusError);
+        console.warn(`Skipping rule "${rule.name}" due to Helius API error`);
+        continue;
+      }
 
       const eligible = holders.filter((h) => h.nftCount >= rule.threshold);
       const totalNfts = eligible.reduce((sum, h) => sum + h.nftCount, 0);
