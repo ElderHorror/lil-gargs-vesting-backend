@@ -42,6 +42,7 @@ router.put('/config/claim-policy', configController.updateClaimPolicy.bind(confi
 router.get('/user/vesting/list', userVestingController.listUserVestings.bind(userVestingController));
 router.get('/user/vesting/summary', userVestingController.getVestingSummary.bind(userVestingController));
 router.get('/user/vesting/history', userVestingController.getClaimHistory.bind(userVestingController));
+router.get('/user/vesting/claim-history', userVestingController.getClaimHistory.bind(userVestingController));
 router.post('/user/vesting/claim', userVestingController.claimVesting.bind(userVestingController));
 router.post('/user/vesting/complete-claim', userVestingController.completeClaimWithFee.bind(userVestingController));
 

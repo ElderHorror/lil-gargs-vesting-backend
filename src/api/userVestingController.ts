@@ -366,7 +366,7 @@ export class UserVestingController {
 
       // Get claim history from database with vesting information
       const { data: historyWithVestings, error: historyError } = await this.dbService.supabase
-        .from('claims')
+        .from('claim_history')
         .select(`
           *,
           vestings (
@@ -763,7 +763,7 @@ export class UserVestingController {
 
       // Check if this fee signature has already been used (prevent duplicate claims)
       const { data: existingClaim } = await this.dbService.supabase
-        .from('claims')
+        .from('claim_history')
         .select('id')
         .eq('transaction_signature', feeSignature)
         .single();
