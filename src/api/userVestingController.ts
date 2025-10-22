@@ -50,9 +50,16 @@ export class UserVestingController {
         return res.json({ success: true, vestings: [] });
       }
 
-      // Filter out pools that haven't started yet
+      // Filter out vestings with missing pool data or pools that haven't started yet
       const now = new Date();
       const startedVestings = vestings.filter((v: any) => {
+        // Skip if pool data is missing (orphaned vesting record)
+        if (!v.vesting_streams) {
+          console.warn(`⚠️ Vesting ${v.id} has no associated pool (orphaned record)`);
+          return false;
+        }
+        
+        // Skip if pool hasn't started yet
         const startTime = new Date(v.vesting_streams.start_time);
         return startTime <= now;
       });
@@ -148,12 +155,25 @@ export class UserVestingController {
         return res.status(404).json({ error: 'No active vesting found for this wallet' });
       }
 
+      // Filter out vestings with missing pool data (orphaned records)
+      const validVestings = vestings.filter((v: any) => {
+        if (!v.vesting_streams) {
+          console.warn(`⚠️ Vesting ${v.id} has no associated pool (orphaned record)`);
+          return false;
+        }
+        return true;
+      });
+
+      if (validVestings.length === 0) {
+        return res.status(404).json({ error: 'No valid vesting found for this wallet' });
+      }
+
       // Use the most recent vesting (first in the list, ordered by created_at DESC)
       // TODO: Frontend should show all vestings and let user choose
-      let vesting = vestings[0];
+      let vesting = validVestings[0];
 
       if (poolId && typeof poolId === 'string') {
-        const matchingVesting = vestings.find((v: any) => v.vesting_stream_id === poolId);
+        const matchingVesting = validVestings.find((v: any) => v.vesting_stream_id === poolId);
 
         if (!matchingVesting) {
           return res.status(404).json({ error: 'Vesting not found for specified pool' });
@@ -164,9 +184,9 @@ export class UserVestingController {
 
       const stream = vesting.vesting_streams;
       
-      if (vestings.length > 1) {
-        console.log(`[SUMMARY] ⚠️ User has ${vestings.length} active vesting(s), showing pool: ${vesting.vesting_mode} "${stream.name}"`);
-        console.log('[SUMMARY] Pools:', vestings.map((v: any) => ({
+      if (validVestings.length > 1) {
+        console.log(`[SUMMARY] ⚠️ User has ${validVestings.length} active vesting(s), showing pool: ${vesting.vesting_mode} "${stream.name}"`);
+        console.log('[SUMMARY] Pools:', validVestings.map((v: any) => ({
           mode: v.vesting_mode,
           pool: v.vesting_streams?.name,
           id: v.vesting_stream_id,
