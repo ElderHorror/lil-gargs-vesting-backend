@@ -36,7 +36,9 @@
     "test:snapshot": "ts-node scripts/testSnapshot.ts",
     "test:create-snapshot-pool": "ts-node scripts/createSnapshotTestPool.ts",
     "test:create-cliff-pool": "ts-node scripts/createCliffTestPool.ts",
-    "pool:create-manual": "ts-node scripts/createManualPool.ts"
+    "pool:create-manual": "ts-node scripts/createManualPool.ts",
+    "test:cancelled-members": "ts-node scripts/testCancelledMembersFix.ts",
+    "cleanup:cancelled-members": "ts-node scripts/cleanupCancelledMembers.ts"
   },
   "dependencies": {
     "@chakra-ui/icons": "^2.2.4",

@@ -26,11 +26,12 @@ export class AdminController {
         return res.status(400).json({ error: 'Pool ID is required' });
       }
 
-      // Get all vestings for this pool
+      // Get all active vestings for this pool (exclude cancelled members)
       const { data: members, error } = await this.dbService.supabase
         .from('vestings')
         .select('id, user_wallet, token_amount, nft_count, tier, created_at, is_active, is_cancelled')
-        .eq('vesting_stream_id', poolId);
+        .eq('vesting_stream_id', poolId)
+        .eq('is_cancelled', false);
 
       if (error) {
         throw new Error(`Failed to fetch pool members: ${error.message}`);
