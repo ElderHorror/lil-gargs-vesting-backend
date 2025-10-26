@@ -29,11 +29,19 @@ const treasuryController = new TreasuryController();
 // Pool routes
 router.post('/pools', poolController.createPool.bind(poolController));
 router.post('/pools/validate', poolController.validatePool.bind(poolController));
+router.put('/pools/:id/allocations', poolController.updateAllocations.bind(poolController));
+router.put('/pools/:id/rules/:ruleId', poolController.updatePoolRule.bind(poolController));
 router.get('/pools', poolController.listPools.bind(poolController));
 router.get('/pools/:id', poolController.getPoolDetails.bind(poolController));
 router.get('/pools/:id/activity', poolController.getPoolActivity.bind(poolController));
 router.get('/pools/:id/users/:wallet', poolController.getUserStatus.bind(poolController));
 router.get('/pools/:id/streamflow-status', poolController.getStreamflowStatus.bind(poolController));
+router.post('/pools/:id/rules', poolController.addRule.bind(poolController));
+router.post('/pools/:id/sync', poolController.syncPool.bind(poolController));
+router.delete('/pools/:id', poolController.cancelPool.bind(poolController));
+router.post('/pools/:id/deploy-streamflow', poolController.deployToStreamflow.bind(poolController));
+router.post('/pools/:id/cancel-streamflow', poolController.cancelStreamflowPool.bind(poolController));
+router.post('/pools/:id/topup', poolController.topupPool.bind(poolController));
 
 // Config routes
 router.get('/config/check-admin', configController.checkAdmin.bind(configController));
@@ -44,9 +52,11 @@ router.put('/config/mode', configController.switchMode.bind(configController));
 // User vesting routes
 router.get('/user/vesting/list', userVestingController.listUserVestings.bind(userVestingController));
 router.get('/user/vesting/summary', userVestingController.getVestingSummary.bind(userVestingController));
+router.get('/user/vesting/summary-all', userVestingController.getVestingSummaryAll.bind(userVestingController));
 router.get('/user/vesting/history', userVestingController.getClaimHistory.bind(userVestingController));
 router.get('/user/vesting/claim-history', userVestingController.getClaimHistory.bind(userVestingController));
 router.post('/user/vesting/claim', userVestingController.claimVesting.bind(userVestingController));
+router.post('/user/vesting/claim-all', userVestingController.claimAllVestings.bind(userVestingController));
 router.post('/user/vesting/complete-claim', userVestingController.completeClaimWithFee.bind(userVestingController));
 
 // Admin logs routes
