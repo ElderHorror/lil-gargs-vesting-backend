@@ -1084,10 +1084,10 @@ export class UserVestingController {
         });
       }
 
-      // Filter out invalid vestings
+      // Filter out invalid vestings (cancelled and paused pools should not contribute to claimable amount)
       const validVestings = vestings.filter((v: any) => {
         if (!v.vesting_streams) return false;
-        if (v.vesting_streams.state === 'cancelled') return false;
+        if (v.vesting_streams.state === 'cancelled' || v.vesting_streams.state === 'paused') return false;
         const startTime = new Date(v.vesting_streams.start_time);
         return startTime <= new Date();
       });
@@ -1184,10 +1184,14 @@ export class UserVestingController {
       const totalAllocation = validVestings.reduce((sum: number, v: any) => sum + v.token_amount, 0);
       const vestedPercentage = totalAllocation > 0 ? (totalVested / totalAllocation) * 100 : 0;
 
+      // Round down totalClaimable to 2 decimal places to match frontend display
+      // This ensures users can claim exactly what they see
+      const roundedTotalClaimable = Math.floor(totalClaimable * 100) / 100;
+
       res.json({
         success: true,
         data: {
-          totalClaimable,
+          totalClaimable: roundedTotalClaimable,
           totalLocked,
           totalClaimed,
           totalVested,
@@ -1301,11 +1305,15 @@ export class UserVestingController {
         });
       }
 
+      // Round down totalAvailable to 2 decimal places to match what frontend shows
+      const roundedTotalAvailable = Math.floor(totalAvailable * 100) / 100;
+
       // Validate requested amount
-      if (amountToClaim > totalAvailable) {
+      if (amountToClaim > roundedTotalAvailable) {
         return res.status(400).json({
-          error: `Requested amount ${amountToClaim} exceeds available ${totalAvailable}`,
-          available: totalAvailable,
+          error: `Requested amount ${amountToClaim.toFixed(2)} exceeds available balance ${roundedTotalAvailable.toFixed(2)}`,
+          available: roundedTotalAvailable,
+          requested: amountToClaim,
         });
       }
 
