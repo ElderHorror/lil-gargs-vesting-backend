@@ -1112,7 +1112,7 @@ export class UserVestingController {
       const TOKEN_DECIMALS = 9;
       const TOKEN_DIVISOR = Math.pow(10, TOKEN_DECIMALS);
 
-      // Calculate aggregated totals
+      // Calculate aggregated totals (only from active pools)
       let totalClaimable = 0;
       let totalLocked = 0;
       let totalClaimed = 0;
@@ -1122,6 +1122,7 @@ export class UserVestingController {
 
       const poolsData = [];
 
+      // Process only active pools for totals
       for (const vesting of validVestings) {
         const stream = vesting.vesting_streams;
         const totalAllocation = vesting.token_amount;
@@ -1155,6 +1156,7 @@ export class UserVestingController {
         const unlockedBalance = Math.max(0, vestedAmount - vestingTotalClaimed);
         const lockedBalance = totalAllocation - vestedAmount;
 
+        // Only add to totals if pool is active
         totalClaimable += unlockedBalance;
         totalLocked += lockedBalance;
         totalClaimed += vestingTotalClaimed;
@@ -1178,6 +1180,61 @@ export class UserVestingController {
           share: sharePercentage,
           nftCount: vesting.nft_count,
           status: stream.state || 'active',
+        });
+      }
+
+      // Also add paused/cancelled pools to display (but not to totals)
+      const pausedCancelledVestings = vestings.filter((v: any) => {
+        if (!v.vesting_streams) return false;
+        return v.vesting_streams.state === 'cancelled' || v.vesting_streams.state === 'paused';
+      });
+
+      for (const vesting of pausedCancelledVestings) {
+        const stream = vesting.vesting_streams;
+        const totalAllocation = vesting.token_amount;
+        const startTime = stream.start_time ? Math.floor(new Date(stream.start_time).getTime() / 1000) : now;
+        const vestingDurationSeconds = stream.vesting_duration_seconds || (stream.vesting_duration_days * 86400);
+        const cliffDurationSeconds = stream.cliff_duration_seconds || (stream.cliff_duration_days * 86400);
+        const endTime = stream.end_time ? Math.floor(new Date(stream.end_time).getTime() / 1000) : now + vestingDurationSeconds;
+        const cliffTime = startTime + cliffDurationSeconds;
+
+        // Calculate vested amount
+        let vestedAmount = 0;
+        if (stream.streamflow_stream_id) {
+          try {
+            const streamflowVested = await this.streamflowService.getVestedAmount(stream.streamflow_stream_id);
+            const poolTotal = stream.total_pool_amount;
+            const vestedPercentage = streamflowVested / poolTotal;
+            vestedAmount = totalAllocation * vestedPercentage;
+          } catch (err) {
+            const vestedPercentage = this.calculateVestedPercentage(now, startTime, endTime, cliffTime);
+            vestedAmount = totalAllocation * vestedPercentage;
+          }
+        } else {
+          const vestedPercentage = this.calculateVestedPercentage(now, startTime, endTime, cliffTime);
+          vestedAmount = totalAllocation * vestedPercentage;
+        }
+
+        // Get claims for this specific vesting
+        const vestingClaims = claimHistory.filter(claim => claim.vesting_id === vesting.id);
+        const vestingTotalClaimed = vestingClaims.reduce((sum, claim) => sum + Number(claim.amount_claimed), 0) / TOKEN_DIVISOR;
+
+        const unlockedBalance = Math.max(0, vestedAmount - vestingTotalClaimed);
+        const lockedBalance = totalAllocation - vestedAmount;
+
+        // Add to pools data for display only (NOT to totals)
+        const poolTotal = stream.total_pool_amount;
+        const sharePercentage = vesting.share_percentage || ((totalAllocation / poolTotal) * 100);
+
+        poolsData.push({
+          poolId: vesting.vesting_stream_id,
+          poolName: stream.name,
+          claimable: unlockedBalance,
+          locked: lockedBalance,
+          claimed: vestingTotalClaimed,
+          share: sharePercentage,
+          nftCount: vesting.nft_count,
+          status: stream.state || 'paused',
         });
       }
 
