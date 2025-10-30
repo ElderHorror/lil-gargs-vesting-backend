@@ -1117,7 +1117,7 @@ export class UserVestingController {
       const TOKEN_DECIMALS = 9;
       const TOKEN_DIVISOR = Math.pow(10, TOKEN_DECIMALS);
 
-      // Calculate aggregated totals (only from active pools)
+      // Calculate aggregated totalss (only from active pools)
       let totalClaimable = 0;
       let totalLocked = 0;
       let totalClaimed = 0;
