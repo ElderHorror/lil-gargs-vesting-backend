@@ -1092,6 +1092,11 @@ export class UserVestingController {
         return startTime <= new Date();
       });
 
+      console.log(`[getVestingSummaryAll] Total vestings: ${vestings.length}, Valid (active) vestings: ${validVestings.length}`);
+      vestings.forEach((v: any, idx: number) => {
+        console.log(`  Vesting ${idx}: ${v.vesting_streams?.name} - Status: ${v.vesting_streams?.state || 'active'}`);
+      });
+
       if (validVestings.length === 0) {
         return res.json({
           success: true,
@@ -1244,6 +1249,12 @@ export class UserVestingController {
       // Round down totalClaimable to 2 decimal places to match frontend display
       // This ensures users can claim exactly what they see
       const roundedTotalClaimable = Math.floor(totalClaimable * 100) / 100;
+
+      console.log(`[getVestingSummaryAll] Calculated totals - Claimable: ${totalClaimable}, Rounded: ${roundedTotalClaimable}`);
+      console.log(`[getVestingSummaryAll] Pools data count: ${poolsData.length}`);
+      poolsData.forEach((p: any) => {
+        console.log(`  Pool: ${p.poolName} - Claimable: ${p.claimable}, Status: ${p.status}`);
+      });
 
       res.json({
         success: true,
