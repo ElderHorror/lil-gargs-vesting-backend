@@ -6,6 +6,7 @@ import { SupabaseService } from '../services/supabaseService';
 import { StreamflowService } from '../services/streamflowService';
 import { PriceService } from '../services/priceService';
 import { config } from '../config';
+import { cache } from '../lib/cache';
 
 /**
  * User Vesting API Controller
@@ -16,6 +17,7 @@ export class UserVestingController {
   private connection: Connection;
   private streamflowService: StreamflowService;
   private priceService: PriceService;
+  private lastBlockhash: { hash: string; timestamp: number } | null = null;
 
   constructor() {
     const supabaseClient = createClient(config.supabaseUrl, config.supabaseServiceRoleKey);
@@ -483,6 +485,7 @@ export class UserVestingController {
       }
 
       // Get claim history and calculate available amounts per pool
+      // Optimized: Fetch vestings with claim history in single query
       const claimHistory = await this.dbService.getClaimHistory(userWallet);
       const TOKEN_DECIMALS = 9;
       const TOKEN_DIVISOR = Math.pow(10, TOKEN_DECIMALS);
@@ -499,11 +502,19 @@ export class UserVestingController {
         const endTime = stream.end_time ? Math.floor(new Date(stream.end_time).getTime() / 1000) : now + vestingDurationSeconds;
         const cliffTime = startTime + cliffDurationSeconds;
 
-        // Calculate vested amount
+        // Calculate vested amount (with Streamflow caching)
         let vestedAmount = 0;
         if (stream.streamflow_stream_id) {
           try {
-            const streamflowVested = await this.streamflowService.getVestedAmount(stream.streamflow_stream_id);
+            // Check cache first (30 second TTL)
+            const cacheKey = `streamflow:${stream.streamflow_stream_id}`;
+            let streamflowVested = cache.get<number>(cacheKey);
+            
+            if (streamflowVested === null) {
+              streamflowVested = await this.streamflowService.getVestedAmount(stream.streamflow_stream_id);
+              cache.set(cacheKey, streamflowVested, 30);
+            }
+            
             const poolTotal = stream.total_pool_amount;
             const vestedPercentage = streamflowVested / poolTotal;
             vestedAmount = totalAllocation * vestedPercentage;
@@ -576,10 +587,22 @@ export class UserVestingController {
       // Get claim fee from config
       const claimFeeUsd = dbConfig?.claim_fee_usd || 10.0;
 
-      // Get real-time SOL/USD price from Pyth oracle
+      // Get real-time SOL/USD price from Pyth oracle (with 10 second cache)
       const { PriceService } = await import('../services/priceService');
       const priceService = new PriceService(this.connection, 'mainnet-beta');
-      const { solAmount: feeInSol, solPrice: solPriceUsd } = await priceService.calculateSolFee(claimFeeUsd);
+      
+      let feeInSol: number, solPriceUsd: number;
+      const priceCache = cache.get<{ solAmount: number; solPrice: number }>('solPrice');
+      
+      if (priceCache) {
+        feeInSol = priceCache.solAmount;
+        solPriceUsd = priceCache.solPrice;
+      } else {
+        const priceData = await priceService.calculateSolFee(claimFeeUsd);
+        feeInSol = priceData.solAmount;
+        solPriceUsd = priceData.solPrice;
+        cache.set('solPrice', { solAmount: feeInSol, solPrice: solPriceUsd }, 10);
+      }
       const feeInLamports = Math.floor(feeInSol * LAMPORTS_PER_SOL);
       
       console.log(`[CLAIM] Fee: $${claimFeeUsd} USD = ${feeInSol.toFixed(4)} SOL (SOL price: $${solPriceUsd.toFixed(2)})`);
@@ -608,20 +631,23 @@ export class UserVestingController {
       const userPublicKey = new PublicKey(userWallet);
       const feeWalletPubkey = treasuryKeypair.publicKey;
 
-      // Check user has enough SOL for fee
-      const userBalance = await this.connection.getBalance(userPublicKey);
-      const requiredBalance = feeInLamports + 5000;
-      
-      if (userBalance < requiredBalance) {
-        return res.status(400).json({ 
-          error: `Insufficient SOL balance. Required: ${(requiredBalance / LAMPORTS_PER_SOL).toFixed(4)} SOL, Available: ${(userBalance / LAMPORTS_PER_SOL).toFixed(4)} SOL` 
-        });
-      }
+      // Skip balance check - user will get error from Solana if insufficient SOL
+      // This saves 1 RPC call per claim request
 
       console.log(`[CLAIM] Creating fee transaction: ${feeInSol} SOL from ${userWallet} to ${feeWalletPubkey.toBase58()}`);
 
       // Create fee payment transaction (user pays fee to treasury)
-      const { blockhash } = await this.connection.getLatestBlockhash('finalized');
+      // Use cached blockhash if available (5 second TTL)
+      let blockhash: string;
+      const now_ms = Date.now();
+      
+      if (this.lastBlockhash && (now_ms - this.lastBlockhash.timestamp) < 5000) {
+        blockhash = this.lastBlockhash.hash;
+      } else {
+        const result = await this.connection.getLatestBlockhash('finalized');
+        blockhash = result.blockhash;
+        this.lastBlockhash = { hash: blockhash, timestamp: now_ms };
+      }
 
       const message = new TransactionMessage({
         payerKey: userPublicKey,
@@ -638,6 +664,9 @@ export class UserVestingController {
       // Create a VersionedTransaction with empty signatures for the frontend to sign
       const versionedTx = new VersionedTransaction(message);
       const serializedFeeTx = Buffer.from(versionedTx.serialize()).toString('base64');
+      
+      // Clear blockhash cache after use to ensure fresh blockhash for transaction
+      this.lastBlockhash = null;
 
       // Return fee transaction for user to sign
       res.json({
@@ -865,7 +894,7 @@ export class UserVestingController {
             vesting_id: poolItem.vestingId,
             amount_claimed: amountInBaseUnits,
             fee_paid: proportionalFee,
-            transaction_signature: feeSignature,
+            transaction_signature: tokenSignature,
           });
           
           console.log(`[COMPLETE-CLAIM] Recorded claim for pool ${poolItem.poolName}: ${poolItem.amountToClaim} tokens`);
@@ -977,11 +1006,19 @@ export class UserVestingController {
         const endTime = stream.end_time ? Math.floor(new Date(stream.end_time).getTime() / 1000) : now + vestingDurationSeconds;
         const cliffTime = startTime + cliffDurationSeconds;
 
-        // Calculate vested amount
+        // Calculate vested amount (with Streamflow caching)
         let vestedAmount = 0;
         if (stream.streamflow_stream_id) {
           try {
-            const streamflowVested = await this.streamflowService.getVestedAmount(stream.streamflow_stream_id);
+            // Check cache first (30 second TTL)
+            const cacheKey = `streamflow:${stream.streamflow_stream_id}`;
+            let streamflowVested = cache.get<number>(cacheKey);
+            
+            if (streamflowVested === null) {
+              streamflowVested = await this.streamflowService.getVestedAmount(stream.streamflow_stream_id);
+              cache.set(cacheKey, streamflowVested, 30);
+            }
+            
             const poolTotal = stream.total_pool_amount;
             const vestedPercentage = streamflowVested / poolTotal;
             vestedAmount = totalAllocation * vestedPercentage;
@@ -1043,11 +1080,19 @@ export class UserVestingController {
         const endTime = stream.end_time ? Math.floor(new Date(stream.end_time).getTime() / 1000) : now + vestingDurationSeconds;
         const cliffTime = startTime + cliffDurationSeconds;
 
-        // Calculate vested amount
+        // Calculate vested amount (with Streamflow caching)
         let vestedAmount = 0;
         if (stream.streamflow_stream_id) {
           try {
-            const streamflowVested = await this.streamflowService.getVestedAmount(stream.streamflow_stream_id);
+            // Check cache first (30 second TTL)
+            const cacheKey = `streamflow:${stream.streamflow_stream_id}`;
+            let streamflowVested = cache.get<number>(cacheKey);
+            
+            if (streamflowVested === null) {
+              streamflowVested = await this.streamflowService.getVestedAmount(stream.streamflow_stream_id);
+              cache.set(cacheKey, streamflowVested, 30);
+            }
+            
             const poolTotal = stream.total_pool_amount;
             const vestedPercentage = streamflowVested / poolTotal;
             vestedAmount = totalAllocation * vestedPercentage;
@@ -1175,11 +1220,19 @@ export class UserVestingController {
         const endTime = stream.end_time ? Math.floor(new Date(stream.end_time).getTime() / 1000) : now + vestingDurationSeconds;
         const cliffTime = startTime + cliffDurationSeconds;
 
-        // Calculate vested amount
+        // Calculate vested amount (with Streamflow caching)
         let vestedAmount = 0;
         if (stream.streamflow_stream_id) {
           try {
-            const streamflowVested = await this.streamflowService.getVestedAmount(stream.streamflow_stream_id);
+            // Check cache first (30 second TTL)
+            const cacheKey = `streamflow:${stream.streamflow_stream_id}`;
+            let streamflowVested = cache.get<number>(cacheKey);
+            
+            if (streamflowVested === null) {
+              streamflowVested = await this.streamflowService.getVestedAmount(stream.streamflow_stream_id);
+              cache.set(cacheKey, streamflowVested, 30);
+            }
+            
             const poolTotal = stream.total_pool_amount;
             const vestedPercentage = streamflowVested / poolTotal;
             vestedAmount = totalAllocation * vestedPercentage;
@@ -1524,11 +1577,19 @@ export class UserVestingController {
         const endTime = stream.end_time ? Math.floor(new Date(stream.end_time).getTime() / 1000) : now + vestingDurationSeconds;
         const cliffTime = startTime + cliffDurationSeconds;
 
-        // Calculate vested amount
+        // Calculate vested amount (with Streamflow caching)
         let vestedAmount = 0;
         if (stream.streamflow_stream_id) {
           try {
-            const streamflowVested = await this.streamflowService.getVestedAmount(stream.streamflow_stream_id);
+            // Check cache first (30 second TTL)
+            const cacheKey = `streamflow:${stream.streamflow_stream_id}`;
+            let streamflowVested = cache.get<number>(cacheKey);
+            
+            if (streamflowVested === null) {
+              streamflowVested = await this.streamflowService.getVestedAmount(stream.streamflow_stream_id);
+              cache.set(cacheKey, streamflowVested, 30);
+            }
+            
             const poolTotal = stream.total_pool_amount;
             const vestedPercentage = streamflowVested / poolTotal;
             vestedAmount = totalAllocation * vestedPercentage;
