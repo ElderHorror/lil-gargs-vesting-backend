@@ -1,12 +1,13 @@
--- Add UNIQUE constraint to prevent duplicate claims
--- This ensures that the same transaction signature cannot be used twice
--- which prevents race conditions where two simultaneous requests create duplicate claims
-
--- First, check if constraint already exists
--- If it does, this will fail silently (safe to run multiple times)
-
+-- Drop old UNIQUE constraint on just transaction_signature (if it exists)
+-- This allows multiple claims with the same transaction signature (one per user)
 ALTER TABLE claim_history
-ADD CONSTRAINT unique_claim_per_signature 
+DROP CONSTRAINT IF EXISTS claim_history_transaction_signature_key;
+
+-- Add new UNIQUE constraint on (user_wallet, transaction_signature)
+-- This ensures that each wallet can only have one claim per transaction
+-- but multiple wallets can share the same transaction signature
+ALTER TABLE claim_history
+ADD CONSTRAINT unique_claim_per_wallet_signature 
 UNIQUE (user_wallet, transaction_signature);
 
 -- Note: If you get an error about duplicate values, you may need to:

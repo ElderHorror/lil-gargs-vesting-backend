@@ -834,9 +834,13 @@ export class UserVestingController {
         try {
           console.log(`[COMPLETE-CLAIM] Sending transaction (attempt ${attempt}/${maxRetries})...`);
           
+          // Get fresh blockhash for each attempt to ensure valid transaction
+          const { blockhash: freshBlockhash } = await this.connection.getLatestBlockhash();
+          tokenTransferTx.recentBlockhash = freshBlockhash;
+          
           tokenSignature = await this.connection.sendTransaction(tokenTransferTx, [treasuryKeypair], {
-            skipPreflight: false,
-            maxRetries: 3,
+            skipPreflight: true,
+            maxRetries: 0, // We handle retries ourselves
           });
           
           console.log(`[COMPLETE-CLAIM] Transaction sent: ${tokenSignature}, confirming...`);
@@ -883,9 +887,6 @@ export class UserVestingController {
           const waitTime = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
           console.log(`[COMPLETE-CLAIM] Retrying in ${waitTime}ms...`);
           await new Promise(resolve => setTimeout(resolve, waitTime));
-          
-          const { blockhash: newBlockhash } = await this.connection.getLatestBlockhash();
-          tokenTransferTx.recentBlockhash = newBlockhash;
         }
       }
 
@@ -1426,9 +1427,13 @@ export class UserVestingController {
         try {
           console.log(`[CLAIM-ALL] Sending transaction (attempt ${attempt}/${maxRetries})...`);
 
+          // Get fresh blockhash for each attempt to ensure valid transaction
+          const { blockhash: freshBlockhash } = await this.connection.getLatestBlockhash();
+          tokenTransferTx.recentBlockhash = freshBlockhash;
+
           tokenSignature = await this.connection.sendTransaction(tokenTransferTx, [treasuryKeypair], {
-            skipPreflight: false,
-            maxRetries: 3,
+            skipPreflight: true,
+            maxRetries: 0, // We handle retries ourselves
           });
 
           console.log(`[CLAIM-ALL] Transaction sent: ${tokenSignature}, confirming...`);
@@ -1480,9 +1485,6 @@ export class UserVestingController {
 
           const waitTime = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
           await new Promise(resolve => setTimeout(resolve, waitTime));
-
-          const { blockhash: newBlockhash } = await this.connection.getLatestBlockhash();
-          tokenTransferTx.recentBlockhash = newBlockhash;
         }
       }
 

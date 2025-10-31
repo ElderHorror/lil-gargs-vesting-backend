@@ -148,10 +148,11 @@ CREATE TABLE IF NOT EXISTS claim_history (
   vesting_id UUID REFERENCES vestings(id),
   amount_claimed NUMERIC NOT NULL,
   fee_paid NUMERIC NOT NULL,
-  transaction_signature TEXT NOT NULL UNIQUE,
+  transaction_signature TEXT NOT NULL,
   claimed_at TIMESTAMPTZ DEFAULT NOW(),
   CONSTRAINT positive_claim_amount CHECK (amount_claimed > 0),
-  CONSTRAINT positive_fee CHECK (fee_paid >= 0)
+  CONSTRAINT positive_fee CHECK (fee_paid >= 0),
+  CONSTRAINT unique_claim_per_wallet_signature UNIQUE (user_wallet, transaction_signature)
 );
 
 COMMENT ON TABLE claim_history IS 'History of all token claims by users';
