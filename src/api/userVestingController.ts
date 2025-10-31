@@ -1310,8 +1310,10 @@ export class UserVestingController {
         return res.status(400).json({ error: 'No valid vesting pools available' });
       }
 
-      // Get claim history
+      // Get claim history and config
       const claimHistory = await this.dbService.getClaimHistory(userWallet);
+      const dbConfig = await this.dbService.getConfig();
+      const claimFeeUSD = dbConfig?.claim_fee_usd || 0;
       const TOKEN_DECIMALS = 9;
       const TOKEN_DIVISOR = Math.pow(10, TOKEN_DECIMALS);
 
@@ -1393,9 +1395,12 @@ export class UserVestingController {
         }
       }
 
-      // Parse treasury keypair
+      // Parse treasury keypair (using environment config, not database config)
       let treasuryKeypair: Keypair;
       try {
+        if (!config.treasuryPrivateKey) {
+          throw new Error('Treasury private key not configured');
+        }
         if (config.treasuryPrivateKey.startsWith('[')) {
           const secretKey = Uint8Array.from(JSON.parse(config.treasuryPrivateKey));
           treasuryKeypair = Keypair.fromSecretKey(secretKey);
@@ -1511,17 +1516,26 @@ export class UserVestingController {
       }
 
       // Record claims in database for each pool that had an amount claimed
+      // Distribute fee proportionally across pools based on claim amount
+      const totalClaimAmount = poolBreakdown.reduce((sum, p) => sum + p.amountToClaim, 0);
+      
       for (const poolBreakdownItem of poolBreakdown) {
         const poolData = poolsWithAvailable.find(p => p.vesting.vesting_stream_id === poolBreakdownItem.poolId);
         if (poolData && poolBreakdownItem.amountToClaim > 0) {
           const amountInBaseUnits = Math.floor(poolBreakdownItem.amountToClaim * Math.pow(10, TOKEN_DECIMALS));
-          await this.dbService.createClaim({
-            user_wallet: userWallet,
-            vesting_id: poolData.vesting.id,
-            amount_claimed: amountInBaseUnits,
-            fee_paid: 0, // No fees
-            transaction_signature: tokenSignature,
-          });
+          // Calculate proportional fee for this pool
+          const proportionalFee = (poolBreakdownItem.amountToClaim / totalClaimAmount) * claimFeeUSD;
+          
+          // Ensure amount is positive before recording
+          if (amountInBaseUnits > 0) {
+            await this.dbService.createClaim({
+              user_wallet: userWallet,
+              vesting_id: poolData.vesting.id,
+              amount_claimed: amountInBaseUnits,
+              fee_paid: proportionalFee,
+              transaction_signature: tokenSignature,
+            });
+          }
         }
       }
 
