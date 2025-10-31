@@ -899,6 +899,13 @@ export class UserVestingController {
       for (const poolItem of poolBreakdown) {
         if (poolItem.amountToClaim > 0) {
           const amountInBaseUnits = Math.floor(poolItem.amountToClaim * Math.pow(10, TOKEN_DECIMALS));
+          
+          // Skip if amount rounds to 0 (too small to record)
+          if (amountInBaseUnits === 0) {
+            console.log(`[COMPLETE-CLAIM] Skipping pool ${poolItem.poolName}: amount too small (${poolItem.amountToClaim} tokens)`);
+            continue;
+          }
+          
           const proportionalFee = (poolItem.amountToClaim / totalClaimAmount) * feeInSol;
           
           await this.dbService.createClaim({
@@ -909,7 +916,7 @@ export class UserVestingController {
             transaction_signature: tokenSignature,
           });
           
-          console.log(`[COMPLETE-CLAIM] Recorded claim for pool ${poolItem.poolName}: ${poolItem.amountToClaim} tokens`);
+          console.log(`[COMPLETE-CLAIM] Recorded claim for pool ${poolItem.poolName}: ${poolItem.amountToClaim} tokens (${amountInBaseUnits} base units)`);
         }
       }
 
@@ -1490,19 +1497,25 @@ export class UserVestingController {
         const poolData = poolsWithAvailable.find(p => p.vesting.vesting_stream_id === poolBreakdownItem.poolId);
         if (poolData && poolBreakdownItem.amountToClaim > 0) {
           const amountInBaseUnits = Math.floor(poolBreakdownItem.amountToClaim * Math.pow(10, TOKEN_DECIMALS));
+          
+          // Skip if amount rounds to 0 (too small to record)
+          if (amountInBaseUnits === 0) {
+            console.log(`[CLAIM-ALL] Skipping pool ${poolBreakdownItem.poolId}: amount too small (${poolBreakdownItem.amountToClaim} tokens)`);
+            continue;
+          }
+          
           // Calculate proportional fee for this pool
           const proportionalFee = (poolBreakdownItem.amountToClaim / totalClaimAmount) * claimFeeUSD;
           
-          // Ensure amount is positive before recording
-          if (amountInBaseUnits > 0) {
-            await this.dbService.createClaim({
-              user_wallet: userWallet,
-              vesting_id: poolData.vesting.id,
-              amount_claimed: amountInBaseUnits,
-              fee_paid: proportionalFee,
-              transaction_signature: tokenSignature,
-            });
-          }
+          await this.dbService.createClaim({
+            user_wallet: userWallet,
+            vesting_id: poolData.vesting.id,
+            amount_claimed: amountInBaseUnits,
+            fee_paid: proportionalFee,
+            transaction_signature: tokenSignature,
+          });
+          
+          console.log(`[CLAIM-ALL] Recorded claim for pool ${poolBreakdownItem.poolId}: ${poolBreakdownItem.amountToClaim} tokens (${amountInBaseUnits} base units)`);
         }
       }
 
