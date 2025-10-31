@@ -19,44 +19,42 @@ export class PriceService {
   }
 
   /**
-   * Get current SOL/USD price from Pyth oracle
+   * Get current SOL/USD price from CoinGecko (primary) with Pyth fallback
    */
   async getSolPrice(): Promise<number> {
-    try {
-      const data = await this.pythClient.getData();
-      const solUsdPrice = data.productPrice.get(this.SOL_USD_FEED);
-      
-      if (!solUsdPrice || !solUsdPrice.price) {
-        console.warn('Pyth price not available, using fallback');
-        return this.getFallbackPrice();
-      }
-
-      const price = solUsdPrice.price;
-      console.log(`SOL/USD price from Pyth: $${price}`);
-      return price;
-    } catch (error) {
-      console.error('Failed to fetch Pyth price:', error);
-      return this.getFallbackPrice();
-    }
-  }
-
-  /**
-   * Fallback to CoinGecko API if Pyth fails
-   */
-  private async getFallbackPrice(): Promise<number> {
+    // Use CoinGecko as primary source
     try {
       const response = await fetch(
         'https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd'
       );
       const data: any = await response.json();
-      const price = data.solana?.usd || 100; // Default to $100 if all fails
-      console.log(`SOL/USD price from CoinGecko: $${price}`);
-      return price;
+      const price = data.solana?.usd;
+      
+      if (price) {
+        console.log(`SOL/USD price from CoinGecko: $${price}`);
+        return price;
+      }
     } catch (error) {
-      console.error('Failed to fetch CoinGecko price:', error);
-      console.log('Using hardcoded fallback: $100');
-      return 100; // Final fallback
+      console.warn('Failed to fetch CoinGecko price, trying Pyth:', error);
     }
+
+    // Fallback to Pyth oracle
+    try {
+      const data = await this.pythClient.getData();
+      const solUsdPrice = data.productPrice.get(this.SOL_USD_FEED);
+      
+      if (solUsdPrice && solUsdPrice.price) {
+        const price = solUsdPrice.price;
+        console.log(`SOL/USD price from Pyth: $${price}`);
+        return price;
+      }
+    } catch (error) {
+      console.error('Failed to fetch Pyth price:', error);
+    }
+
+    // Final fallback to hardcoded value
+    console.log('Using hardcoded fallback: $150');
+    return 150;
   }
 
   /**
