@@ -1510,11 +1510,11 @@ export class UserVestingController {
         throw new Error('Failed to send transaction');
       }
 
-      // Record claims in database for each pool
-      for (const poolData of poolsWithAvailable) {
-        const claimAmount = poolBreakdown.find(p => p.poolId === poolData.vesting.vesting_stream_id)?.amountToClaim || 0;
-        if (claimAmount > 0) {
-          const amountInBaseUnits = Math.floor(claimAmount * Math.pow(10, TOKEN_DECIMALS));
+      // Record claims in database for each pool that had an amount claimed
+      for (const poolBreakdownItem of poolBreakdown) {
+        const poolData = poolsWithAvailable.find(p => p.vesting.vesting_stream_id === poolBreakdownItem.poolId);
+        if (poolData && poolBreakdownItem.amountToClaim > 0) {
+          const amountInBaseUnits = Math.floor(poolBreakdownItem.amountToClaim * Math.pow(10, TOKEN_DECIMALS));
           await this.dbService.createClaim({
             user_wallet: userWallet,
             vesting_id: poolData.vesting.id,
