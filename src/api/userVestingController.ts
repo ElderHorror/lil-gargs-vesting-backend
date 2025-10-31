@@ -841,16 +841,36 @@ export class UserVestingController {
           
           console.log(`[COMPLETE-CLAIM] Transaction sent: ${tokenSignature}, confirming...`);
           
-          // Wait for confirmation with timeout
-          await Promise.race([
-            this.connection.confirmTransaction(tokenSignature, 'confirmed'),
-            new Promise((_, reject) => 
-              setTimeout(() => reject(new Error('Transaction confirmation timeout')), 60000)
-            )
-          ]);
-          
-          console.log('[COMPLETE-CLAIM] Transfer successful! Signature:', tokenSignature);
-          break;
+          // Wait for confirmation with 30 second timeout (reduced from 60s for faster feedback)
+          try {
+            await Promise.race([
+              this.connection.confirmTransaction(tokenSignature, 'confirmed'),
+              new Promise((_, reject) => 
+                setTimeout(() => reject(new Error('Transaction confirmation timeout')), 30000)
+              )
+            ]);
+            
+            console.log('[COMPLETE-CLAIM] Transfer confirmed! Signature:', tokenSignature);
+            break;
+          } catch (confirmError) {
+            // Timeout occurred - check transaction status
+            console.warn(`[COMPLETE-CLAIM] Confirmation timeout, checking transaction status: ${tokenSignature}`);
+            
+            try {
+              const status = await this.connection.getSignatureStatus(tokenSignature);
+              if (status && status.value && !status.value.err) {
+                console.log('[COMPLETE-CLAIM] Transaction confirmed despite timeout! Signature:', tokenSignature);
+                break; // Transaction succeeded, exit retry loop
+              } else if (status && status.value && status.value.err) {
+                throw new Error(`Transaction failed on-chain: ${JSON.stringify(status.value.err)}`);
+              }
+              // Transaction still pending, will retry
+              throw confirmError;
+            } catch (statusError) {
+              console.error('[COMPLETE-CLAIM] Error checking transaction status:', statusError);
+              throw confirmError; // Re-throw original error to retry
+            }
+          }
           
         } catch (err) {
           const lastError = err instanceof Error ? err : new Error('Unknown transaction error');
@@ -1414,7 +1434,7 @@ export class UserVestingController {
           console.log(`[CLAIM-ALL] Transaction sent: ${tokenSignature}, confirming...`);
 
           try {
-            // Use a longer timeout (120 seconds) for confirmation
+            // Use 30 second timeout (reduced from 120s for faster feedback)
             const latestBlockhash = await this.connection.getLatestBlockhash();
             await Promise.race([
               this.connection.confirmTransaction(
@@ -1426,7 +1446,7 @@ export class UserVestingController {
                 'confirmed'
               ),
               new Promise((_, reject) =>
-                setTimeout(() => reject(new Error('Transaction confirmation timeout')), 120000)
+                setTimeout(() => reject(new Error('Transaction confirmation timeout')), 30000)
               ),
             ]);
             

@@ -93,3 +93,15 @@ export const adminRateLimiter = createRateLimiter({
   },
   message: 'Too many admin operations, please try again later.',
 });
+
+// Claim-specific rate limiter (by user wallet)
+// Max 1 claim per wallet per 10 seconds to prevent accidental double-claims
+export const claimRateLimiter = createRateLimiter({
+  windowMs: 10 * 1000, // 10 seconds
+  max: 1, // 1 claim per window
+  keyGenerator: (req) => {
+    const userWallet = req.body?.userWallet;
+    return userWallet ? `claim:${userWallet}` : `ip:${req.ip}`;
+  },
+  message: 'Please wait 10 seconds before claiming again.',
+});

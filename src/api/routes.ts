@@ -12,6 +12,8 @@ import { SnapshotController } from './snapshotController';
 import { StreamController } from './streamController';
 import { TreasuryController } from './treasuryController';
 import { requireAdmin } from '../middleware/adminAuth';
+import { claimRateLimiter } from '../middleware/rateLimiter';
+import { deduplicationMiddleware } from '../middleware/deduplication';
 
 const router = Router();
 const poolController = new PoolController();
@@ -55,8 +57,10 @@ router.get('/user/vesting/summary', userVestingController.getVestingSummary.bind
 router.get('/user/vesting/summary-all', userVestingController.getVestingSummaryAll.bind(userVestingController));
 router.get('/user/vesting/history', userVestingController.getClaimHistory.bind(userVestingController));
 router.get('/user/vesting/claim-history', userVestingController.getClaimHistory.bind(userVestingController));
-router.post('/user/vesting/claim', userVestingController.claimVesting.bind(userVestingController));
-router.post('/user/vesting/complete-claim', userVestingController.completeClaimWithFee.bind(userVestingController));
+
+// Claim routes with rate limiting and deduplication
+router.post('/user/vesting/claim', claimRateLimiter, deduplicationMiddleware, userVestingController.claimVesting.bind(userVestingController));
+router.post('/user/vesting/complete-claim', claimRateLimiter, deduplicationMiddleware, userVestingController.completeClaimWithFee.bind(userVestingController));
 
 // Admin logs routes
 router.get('/admin-logs', adminLogsController.getAdminLogs.bind(adminLogsController));
