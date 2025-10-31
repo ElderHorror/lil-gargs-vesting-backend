@@ -724,19 +724,11 @@ export class UserVestingController {
 
       console.log('[COMPLETE-CLAIM] Fee transaction verified');
 
-      // Check if this fee signature has already been used (prevent duplicate claims)
-      const { data: existingClaim } = await this.dbService.supabase
-        .from('claim_history')
-        .select('id')
-        .eq('transaction_signature', feeSignature)
-        .single();
-
-      if (existingClaim) {
-        console.error('[COMPLETE-CLAIM] Fee signature already used:', feeSignature);
-        return res.status(400).json({ error: 'This fee payment has already been used for a claim' });
-      }
-
-      console.log('[COMPLETE-CLAIM] Fee signature is unique, proceeding...');
+      // Note: Duplicate claim prevention is now handled by:
+      // 1. Database UNIQUE constraint on (user_wallet, transaction_signature)
+      // 2. Rate limiter (max 1 claim per wallet per 10 seconds)
+      // 3. Deduplication middleware (catches duplicate requests)
+      // We no longer check feeSignature since we use tokenSignature for the actual transfer
 
       // Calculate total claim amount from breakdown
       const totalClaimAmount = poolBreakdown.reduce((sum: number, p: any) => sum + p.amountToClaim, 0);
@@ -826,68 +818,67 @@ export class UserVestingController {
         )
       );
 
-      // Send transaction with retry logic
+      // Send transaction - use Solana's built-in retry instead of manual retry
+      // This prevents duplicate transactions
       let tokenSignature: string | null = null;
-      const maxRetries = 3;
-
-      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      
+      try {
+        console.log(`[COMPLETE-CLAIM] Sending transaction...`);
+        
+        // Get blockhash
+        const { blockhash } = await this.connection.getLatestBlockhash();
+        tokenTransferTx.recentBlockhash = blockhash;
+        
+        // Send with Solana's built-in retry (maxRetries: 3)
+        // This retries the SAME transaction, not creating new ones
+        tokenSignature = await this.connection.sendTransaction(tokenTransferTx, [treasuryKeypair], {
+          skipPreflight: true,
+          maxRetries: 3, // Let Solana handle retries
+        });
+        
+        console.log(`[COMPLETE-CLAIM] Transaction sent: ${tokenSignature}, confirming...`);
+        
+        // Wait for confirmation with 60 second timeout
         try {
-          console.log(`[COMPLETE-CLAIM] Sending transaction (attempt ${attempt}/${maxRetries})...`);
+          await Promise.race([
+            this.connection.confirmTransaction(tokenSignature, 'confirmed'),
+            new Promise((_, reject) => 
+              setTimeout(() => reject(new Error('Transaction confirmation timeout')), 60000)
+            )
+          ]);
           
-          // Get fresh blockhash for each attempt to ensure valid transaction
-          const { blockhash: freshBlockhash } = await this.connection.getLatestBlockhash();
-          tokenTransferTx.recentBlockhash = freshBlockhash;
+          console.log('[COMPLETE-CLAIM] Transfer confirmed! Signature:', tokenSignature);
+        } catch (confirmError) {
+          // Timeout occurred - check transaction status
+          console.warn(`[COMPLETE-CLAIM] Confirmation timeout, checking transaction status: ${tokenSignature}`);
           
-          tokenSignature = await this.connection.sendTransaction(tokenTransferTx, [treasuryKeypair], {
-            skipPreflight: true,
-            maxRetries: 0, // We handle retries ourselves
-          });
-          
-          console.log(`[COMPLETE-CLAIM] Transaction sent: ${tokenSignature}, confirming...`);
-          
-          // Wait for confirmation with 30 second timeout (reduced from 60s for faster feedback)
           try {
-            await Promise.race([
-              this.connection.confirmTransaction(tokenSignature, 'confirmed'),
-              new Promise((_, reject) => 
-                setTimeout(() => reject(new Error('Transaction confirmation timeout')), 30000)
-              )
-            ]);
-            
-            console.log('[COMPLETE-CLAIM] Transfer confirmed! Signature:', tokenSignature);
-            break;
-          } catch (confirmError) {
-            // Timeout occurred - check transaction status
-            console.warn(`[COMPLETE-CLAIM] Confirmation timeout, checking transaction status: ${tokenSignature}`);
-            
-            try {
-              const status = await this.connection.getSignatureStatus(tokenSignature);
-              if (status && status.value && !status.value.err) {
-                console.log('[COMPLETE-CLAIM] Transaction confirmed despite timeout! Signature:', tokenSignature);
-                break; // Transaction succeeded, exit retry loop
-              } else if (status && status.value && status.value.err) {
-                throw new Error(`Transaction failed on-chain: ${JSON.stringify(status.value.err)}`);
+            const status = await this.connection.getSignatureStatus(tokenSignature);
+            if (status && status.value && !status.value.err) {
+              console.log('[COMPLETE-CLAIM] Transaction confirmed despite timeout! Signature:', tokenSignature);
+            } else if (status && status.value && status.value.err) {
+              throw new Error(`Transaction failed on-chain: ${JSON.stringify(status.value.err)}`);
+            } else {
+              // Still unknown - wait a bit more and check again
+              console.log('[COMPLETE-CLAIM] Transaction status still unknown, checking again in 5s...');
+              await new Promise(resolve => setTimeout(resolve, 5000));
+              const retryStatus = await this.connection.getSignatureStatus(tokenSignature);
+              if (retryStatus && retryStatus.value && !retryStatus.value.err) {
+                console.log('[COMPLETE-CLAIM] Transaction confirmed on second check! Signature:', tokenSignature);
+              } else {
+                throw new Error('Transaction confirmation failed');
               }
-              // Transaction still pending, will retry
-              throw confirmError;
-            } catch (statusError) {
-              console.error('[COMPLETE-CLAIM] Error checking transaction status:', statusError);
-              throw confirmError; // Re-throw original error to retry
             }
+          } catch (statusError) {
+            console.error('[COMPLETE-CLAIM] Error checking transaction status:', statusError);
+            throw statusError;
           }
-          
-        } catch (err) {
-          const lastError = err instanceof Error ? err : new Error('Unknown transaction error');
-          console.error(`[COMPLETE-CLAIM] Transaction attempt ${attempt} failed:`, lastError.message);
-          
-          if (attempt === maxRetries) {
-            throw new Error(`Transaction failed after ${maxRetries} attempts: ${lastError.message}`);
-          }
-          
-          const waitTime = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
-          console.log(`[COMPLETE-CLAIM] Retrying in ${waitTime}ms...`);
-          await new Promise(resolve => setTimeout(resolve, waitTime));
         }
+        
+      } catch (err) {
+        const lastError = err instanceof Error ? err : new Error('Unknown transaction error');
+        console.error(`[COMPLETE-CLAIM] Transaction failed:`, lastError.message);
+        throw new Error(`Transaction failed: ${lastError.message}`);
       }
 
       if (!tokenSignature) {
@@ -1421,71 +1412,70 @@ export class UserVestingController {
       tokenTransferTx.feePayer = new PublicKey(userWallet);
 
       let tokenSignature: string | null = null;
-      const maxRetries = 3;
 
-      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`[CLAIM-ALL] Sending transaction...`);
+
+        // Get blockhash
+        const { blockhash } = await this.connection.getLatestBlockhash();
+        tokenTransferTx.recentBlockhash = blockhash;
+
+        // Send with Solana's built-in retry (maxRetries: 3)
+        // This retries the SAME transaction, not creating new ones
+        tokenSignature = await this.connection.sendTransaction(tokenTransferTx, [treasuryKeypair], {
+          skipPreflight: true,
+          maxRetries: 3, // Let Solana handle retries
+        });
+
+        console.log(`[CLAIM-ALL] Transaction sent: ${tokenSignature}, confirming...`);
+
         try {
-          console.log(`[CLAIM-ALL] Sending transaction (attempt ${attempt}/${maxRetries})...`);
-
-          // Get fresh blockhash for each attempt to ensure valid transaction
-          const { blockhash: freshBlockhash } = await this.connection.getLatestBlockhash();
-          tokenTransferTx.recentBlockhash = freshBlockhash;
-
-          tokenSignature = await this.connection.sendTransaction(tokenTransferTx, [treasuryKeypair], {
-            skipPreflight: true,
-            maxRetries: 0, // We handle retries ourselves
-          });
-
-          console.log(`[CLAIM-ALL] Transaction sent: ${tokenSignature}, confirming...`);
-
+          // Use 60 second timeout for confirmation
+          const latestBlockhash = await this.connection.getLatestBlockhash();
+          await Promise.race([
+            this.connection.confirmTransaction(
+              {
+                signature: tokenSignature,
+                blockhash: latestBlockhash.blockhash,
+                lastValidBlockHeight: latestBlockhash.lastValidBlockHeight
+              },
+              'confirmed'
+            ),
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error('Transaction confirmation timeout')), 60000)
+            ),
+          ]);
+          
+          console.log('[CLAIM-ALL] Transfer confirmed successfully! Signature:', tokenSignature);
+        } catch (confirmError) {
+          console.warn(`[CLAIM-ALL] Confirmation timed out, checking transaction status: ${tokenSignature}`);
+          
+          // Check if transaction was actually successful despite timeout
           try {
-            // Use 30 second timeout (reduced from 120s for faster feedback)
-            const latestBlockhash = await this.connection.getLatestBlockhash();
-            await Promise.race([
-              this.connection.confirmTransaction(
-                {
-                  signature: tokenSignature,
-                  blockhash: latestBlockhash.blockhash,
-                  lastValidBlockHeight: latestBlockhash.lastValidBlockHeight
-                },
-                'confirmed'
-              ),
-              new Promise((_, reject) =>
-                setTimeout(() => reject(new Error('Transaction confirmation timeout')), 30000)
-              ),
-            ]);
-            
-            console.log('[CLAIM-ALL] Transfer confirmed successfully! Signature:', tokenSignature);
-            break;
-          } catch (confirmError) {
-            console.warn(`[CLAIM-ALL] Confirmation timed out, checking transaction status: ${tokenSignature}`);
-            
-            // Check if transaction was actually successful despite timeout
-            try {
-              const status = await this.connection.getSignatureStatus(tokenSignature);
-              if (status && status.value && !status.value.err) {
-                console.log('[CLAIM-ALL] Transaction successful despite confirmation timeout! Signature:', tokenSignature);
-                break; // Transaction succeeded, exit retry loop
-              } else if (status && status.value && status.value.err) {
-                throw new Error(`Transaction failed on-chain: ${JSON.stringify(status.value.err)}`);
+            const status = await this.connection.getSignatureStatus(tokenSignature);
+            if (status && status.value && !status.value.err) {
+              console.log('[CLAIM-ALL] Transaction successful despite confirmation timeout! Signature:', tokenSignature);
+            } else if (status && status.value && status.value.err) {
+              throw new Error(`Transaction failed on-chain: ${JSON.stringify(status.value.err)}`);
+            } else {
+              // Still unknown - wait and check again
+              console.log('[CLAIM-ALL] Transaction status still unknown, checking again in 5s...');
+              await new Promise(resolve => setTimeout(resolve, 5000));
+              const retryStatus = await this.connection.getSignatureStatus(tokenSignature);
+              if (retryStatus && retryStatus.value && !retryStatus.value.err) {
+                console.log('[CLAIM-ALL] Transaction confirmed on second check! Signature:', tokenSignature);
+              } else {
+                throw new Error('Transaction confirmation failed');
               }
-              // Transaction still pending, will retry
-              throw confirmError;
-            } catch (statusError) {
-              console.error('[CLAIM-ALL] Error checking transaction status:', statusError);
-              throw confirmError; // Re-throw original error to retry
             }
+          } catch (statusError) {
+            console.error('[CLAIM-ALL] Error checking transaction status:', statusError);
+            throw statusError;
           }
-        } catch (err) {
-          console.error(`[CLAIM-ALL] Transaction attempt ${attempt} failed:`, err);
-
-          if (attempt === maxRetries) {
-            throw new Error(`Transaction failed after ${maxRetries} attempts`);
-          }
-
-          const waitTime = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
-          await new Promise(resolve => setTimeout(resolve, waitTime));
         }
+      } catch (err) {
+        console.error(`[CLAIM-ALL] Transaction failed:`, err);
+        throw new Error(`Transaction failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
       }
 
       if (!tokenSignature) {
