@@ -1154,6 +1154,9 @@ export class UserVestingController {
       // This ensures users can claim exactly what they see
       const roundedTotalClaimable = Math.floor(totalClaimable * 100) / 100;
 
+      // Filter out pools with no claimable balance (fully vested + fully claimed)
+      const activePoolsData = poolsData.filter(pool => pool.claimable > 0);
+
       res.json({
         success: true,
         data: {
@@ -1163,7 +1166,7 @@ export class UserVestingController {
           totalVested,
           vestedPercentage,
           nextUnlockTime,
-          pools: poolsData,
+          pools: activePoolsData,
         },
       });
     } catch (error) {
