@@ -136,17 +136,17 @@ export class SnapshotConfigService {
       }
     }
 
-    // Convert to allocation array
-    result.allocations = Array.from(walletAllocations.entries()).map(
-      ([address, data]) => ({
+    // Convert to allocation array and filter out amounts less than 1 token
+    result.allocations = Array.from(walletAllocations.entries())
+      .map(([address, data]) => ({
         address,
         amount: Math.floor(data.total),
         sources: data.sources.map((s) => ({
           ...s,
           amount: Math.floor(s.amount),
         })),
-      })
-    );
+      }))
+      .filter((allocation) => allocation.amount > 0); // Filter out zero/negative amounts
 
     result.totalWallets = result.allocations.length;
     result.totalAllocated = Math.floor(result.totalAllocated);
