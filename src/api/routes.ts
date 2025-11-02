@@ -57,6 +57,7 @@ router.get('/user/vesting/summary', userVestingController.getVestingSummary.bind
 router.get('/user/vesting/summary-all', userVestingController.getVestingSummaryAll.bind(userVestingController));
 router.get('/user/vesting/history', userVestingController.getClaimHistory.bind(userVestingController));
 router.get('/user/vesting/claim-history', userVestingController.getClaimHistory.bind(userVestingController));
+router.get('/user/vesting/claim-status/:signature', userVestingController.getClaimStatus.bind(userVestingController));
 
 // Claim routes with rate limiting and deduplication
 router.post('/user/vesting/claim', claimRateLimiter, deduplicationMiddleware, userVestingController.claimVesting.bind(userVestingController));

@@ -7,6 +7,7 @@ import { StreamflowService } from '../services/streamflowService';
 import { PriceService } from '../services/priceService';
 import { config } from '../config';
 import { cache } from '../lib/cache';
+import Decimal from 'decimal.js';
 
 /**
  * User Vesting API Controller
@@ -490,6 +491,29 @@ export class UserVestingController {
       const TOKEN_DECIMALS = 9;
       const TOKEN_DIVISOR = Math.pow(10, TOKEN_DECIMALS);
 
+      // OPTIMIZATION: Fetch all Streamflow data in parallel
+      const streamflowPromises = validVestings.map(async (vesting: any) => {
+        const stream = vesting.vesting_streams;
+        if (stream.streamflow_stream_id) {
+          const cacheKey = `streamflow:${stream.streamflow_stream_id}`;
+          let streamflowVested = cache.get<number>(cacheKey);
+          
+          if (streamflowVested === null) {
+            try {
+              streamflowVested = await this.streamflowService.getVestedAmount(stream.streamflow_stream_id);
+              cache.set(cacheKey, streamflowVested, 30);
+            } catch (err) {
+              streamflowVested = null; // Will fall back to time-based calculation
+            }
+          }
+          return { vestingId: vesting.id, streamflowVested };
+        }
+        return { vestingId: vesting.id, streamflowVested: null };
+      });
+
+      const streamflowResults = await Promise.all(streamflowPromises);
+      const streamflowMap = new Map(streamflowResults.map(r => [r.vestingId, r.streamflowVested]));
+
       const poolsWithAvailable = [];
       let totalAvailable = 0;
 
@@ -502,26 +526,14 @@ export class UserVestingController {
         const endTime = stream.end_time ? Math.floor(new Date(stream.end_time).getTime() / 1000) : now + vestingDurationSeconds;
         const cliffTime = startTime + cliffDurationSeconds;
 
-        // Calculate vested amount (with Streamflow caching)
+        // Calculate vested amount using pre-fetched Streamflow data
         let vestedAmount = 0;
-        if (stream.streamflow_stream_id) {
-          try {
-            // Check cache first (30 second TTL)
-            const cacheKey = `streamflow:${stream.streamflow_stream_id}`;
-            let streamflowVested = cache.get<number>(cacheKey);
-            
-            if (streamflowVested === null) {
-              streamflowVested = await this.streamflowService.getVestedAmount(stream.streamflow_stream_id);
-              cache.set(cacheKey, streamflowVested, 30);
-            }
-            
-            const poolTotal = stream.total_pool_amount;
-            const vestedPercentage = streamflowVested / poolTotal;
-            vestedAmount = totalAllocation * vestedPercentage;
-          } catch (err) {
-            const vestedPercentage = this.calculateVestedPercentage(now, startTime, endTime, cliffTime);
-            vestedAmount = totalAllocation * vestedPercentage;
-          }
+        const streamflowVested = streamflowMap.get(vesting.id);
+        
+        if (streamflowVested !== null && streamflowVested !== undefined) {
+          const poolTotal = stream.total_pool_amount;
+          const vestedPercentage = streamflowVested / poolTotal;
+          vestedAmount = totalAllocation * vestedPercentage;
         } else {
           const vestedPercentage = this.calculateVestedPercentage(now, startTime, endTime, cliffTime);
           vestedAmount = totalAllocation * vestedPercentage;
@@ -788,8 +800,8 @@ export class UserVestingController {
         console.log('[COMPLETE-CLAIM] User token account does not exist, will create it');
       }
 
-      // Convert total claim amount to base units
-      const amountInBaseUnits = BigInt(Math.floor(totalClaimAmount * Math.pow(10, TOKEN_DECIMALS)));
+      // Convert total claim amount to base units using Decimal.js for precision
+      const amountInBaseUnits = this.toBaseUnits(totalClaimAmount, TOKEN_DECIMALS);
 
       console.log(`[COMPLETE-CLAIM] Transferring ${totalClaimAmount} tokens (${amountInBaseUnits} base units)`);
 
@@ -838,12 +850,12 @@ export class UserVestingController {
         
         console.log(`[COMPLETE-CLAIM] Transaction sent: ${tokenSignature}, confirming...`);
         
-        // Wait for confirmation with 60 second timeout
+        // Wait for confirmation with 30 second timeout
         try {
           await Promise.race([
             this.connection.confirmTransaction(tokenSignature, 'confirmed'),
             new Promise((_, reject) => 
-              setTimeout(() => reject(new Error('Transaction confirmation timeout')), 60000)
+              setTimeout(() => reject(new Error('Transaction confirmation timeout')), 30000)
             )
           ]);
           
@@ -898,7 +910,8 @@ export class UserVestingController {
       
       for (const poolItem of poolBreakdown) {
         if (poolItem.amountToClaim > 0) {
-          const amountInBaseUnits = Math.floor(poolItem.amountToClaim * Math.pow(10, TOKEN_DECIMALS));
+          // Use Decimal.js for precise conversion
+          const amountInBaseUnits = Number(this.toBaseUnits(poolItem.amountToClaim, TOKEN_DECIMALS));
           
           // Skip if amount rounds to 0 (too small to record)
           if (amountInBaseUnits === 0) {
@@ -1193,6 +1206,16 @@ export class UserVestingController {
         return res.status(400).json({ error: 'amountToClaim must be greater than 0' });
       }
 
+      // Minimum claim amount: 0.001 tokens (1,000,000 base units)
+      const MIN_CLAIM_AMOUNT = 0.001;
+      if (amountToClaim < MIN_CLAIM_AMOUNT) {
+        return res.status(400).json({ 
+          error: `Minimum claim amount is ${MIN_CLAIM_AMOUNT} tokens. You requested ${amountToClaim} tokens.`,
+          minimumAmount: MIN_CLAIM_AMOUNT,
+          requestedAmount: amountToClaim
+        });
+      }
+
       // Get all active vesting pools for user
       const { data: vestings, error: vestingError } = await this.dbService.supabase
         .from('vestings')
@@ -1377,7 +1400,9 @@ export class UserVestingController {
       }
 
       // Add transfer instructions for each pool
-      const amountInBaseUnits = BigInt(Math.floor(amountToClaim * Math.pow(10, TOKEN_DECIMALS)));
+      // Use precise conversion to avoid floating point errors
+      const amountInBaseUnitsFloat = amountToClaim * 1e9;
+      const amountInBaseUnits = BigInt(Math.round(amountInBaseUnitsFloat));
 
       tokenTransferTx.add(
         createTransferInstruction(
@@ -1440,7 +1465,7 @@ export class UserVestingController {
         console.log(`[CLAIM-ALL] Transaction sent: ${tokenSignature}, confirming...`);
 
         try {
-          // Use 60 second timeout for confirmation
+          // Use 30 second timeout for confirmation
           const latestBlockhash = await this.connection.getLatestBlockhash();
           await Promise.race([
             this.connection.confirmTransaction(
@@ -1452,7 +1477,7 @@ export class UserVestingController {
               'confirmed'
             ),
             new Promise((_, reject) =>
-              setTimeout(() => reject(new Error('Transaction confirmation timeout')), 60000)
+              setTimeout(() => reject(new Error('Transaction confirmation timeout')), 30000)
             ),
           ]);
           
@@ -1499,7 +1524,8 @@ export class UserVestingController {
       for (const poolBreakdownItem of poolBreakdown) {
         const poolData = poolsWithAvailable.find(p => p.vesting.vesting_stream_id === poolBreakdownItem.poolId);
         if (poolData && poolBreakdownItem.amountToClaim > 0) {
-          const amountInBaseUnits = Math.floor(poolBreakdownItem.amountToClaim * Math.pow(10, TOKEN_DECIMALS));
+          // Use Decimal.js for precise conversion
+          const amountInBaseUnits = Number(this.toBaseUnits(poolBreakdownItem.amountToClaim, TOKEN_DECIMALS));
           
           // Skip if amount rounds to 0 (too small to record)
           if (amountInBaseUnits === 0) {
@@ -1554,6 +1580,16 @@ export class UserVestingController {
 
       if (!amountToClaim || amountToClaim <= 0) {
         return res.status(400).json({ error: 'amountToClaim must be greater than 0' });
+      }
+
+      // Minimum claim amount: 0.001 tokens (1,000,000 base units)
+      const MIN_CLAIM_AMOUNT = 0.001;
+      if (amountToClaim < MIN_CLAIM_AMOUNT) {
+        return res.status(400).json({ 
+          error: `Minimum claim amount is ${MIN_CLAIM_AMOUNT} tokens. You requested ${amountToClaim} tokens.`,
+          minimumAmount: MIN_CLAIM_AMOUNT,
+          requestedAmount: amountToClaim
+        });
       }
 
       // Get all active vesting pools for user
@@ -1740,7 +1776,9 @@ export class UserVestingController {
       }
 
       // Add transfer instructions for each pool
-      const amountInBaseUnits = BigInt(Math.floor(amountToClaim * Math.pow(10, TOKEN_DECIMALS)));
+      // Use precise conversion to avoid floating point errors
+      const amountInBaseUnitsFloat = amountToClaim * 1e9;
+      const amountInBaseUnits = BigInt(Math.round(amountInBaseUnitsFloat));
 
       tokenTransferTx.add(
         createTransferInstruction(
@@ -1848,7 +1886,7 @@ export class UserVestingController {
           console.log(`[SUBMIT-CLAIM] Transaction sent: ${tokenSignature}, confirming...`);
 
           try {
-            // Use a longer timeout (120 seconds) for confirmation
+            // Use 30 second timeout for confirmation
             const latestBlockhash = await this.connection.getLatestBlockhash();
             await Promise.race([
               this.connection.confirmTransaction(
@@ -1860,7 +1898,7 @@ export class UserVestingController {
                 'confirmed'
               ),
               new Promise((_, reject) =>
-                setTimeout(() => reject(new Error('Transaction confirmation timeout')), 120000)
+                setTimeout(() => reject(new Error('Transaction confirmation timeout')), 30000)
               ),
             ]);
             
@@ -1907,7 +1945,8 @@ export class UserVestingController {
       try {
         for (const poolBreakdownItem of poolBreakdown) {
           if (poolBreakdownItem.amountToClaim > 0) {
-            const amountInBaseUnits = Math.floor(poolBreakdownItem.amountToClaim * Math.pow(10, TOKEN_DECIMALS));
+            // Use Decimal.js for precise conversion
+            const amountInBaseUnits = Number(this.toBaseUnits(poolBreakdownItem.amountToClaim, TOKEN_DECIMALS));
             // Calculate proportional fee for this pool
             const proportionalFee = (poolBreakdownItem.amountToClaim / totalClaimAmount) * (claimFeeUSD || 0);
             
@@ -1959,6 +1998,88 @@ export class UserVestingController {
         error: error instanceof Error ? error.message : 'Unknown error',
       });
     }
+  }
+
+  /**
+   * GET /api/user/vesting/claim-status/:signature
+   * Check the status of a claim transaction
+   */
+  async getClaimStatus(req: Request, res: Response) {
+    try {
+      const { signature } = req.params;
+
+      if (!signature) {
+        return res.status(400).json({ error: 'Transaction signature is required' });
+      }
+
+      console.log(`[CLAIM-STATUS] Checking status for signature: ${signature}`);
+
+      // Check transaction status on Solana
+      const status = await this.connection.getSignatureStatus(signature);
+
+      if (!status || !status.value) {
+        return res.json({
+          success: true,
+          status: 'pending',
+          message: 'Transaction not yet confirmed',
+          signature,
+        });
+      }
+
+      if (status.value.err) {
+        return res.json({
+          success: true,
+          status: 'failed',
+          message: 'Transaction failed on-chain',
+          error: JSON.stringify(status.value.err),
+          signature,
+        });
+      }
+
+      // Transaction succeeded - check if it's recorded in database
+      const { data: claims, error: dbError } = await this.dbService.supabase
+        .from('claim_history')
+        .select('*')
+        .eq('transaction_signature', signature)
+        .limit(1);
+
+      const isRecorded = claims && claims.length > 0;
+
+      return res.json({
+        success: true,
+        status: 'confirmed',
+        message: 'Transaction confirmed on-chain',
+        signature,
+        confirmations: status.value.confirmations || 0,
+        slot: status.value.slot,
+        recordedInDatabase: isRecorded,
+      });
+    } catch (error) {
+      console.error('[CLAIM-STATUS] Error checking transaction status:', error);
+      res.status(500).json({
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  }
+
+  /**
+   * Helper: Convert token amount to base units with precision
+   * Uses Decimal.js to avoid floating point errors
+   */
+  private toBaseUnits(amount: number, decimals: number = 9): bigint {
+    const decimal = new Decimal(amount);
+    const multiplier = new Decimal(10).pow(decimals);
+    const baseUnits = decimal.times(multiplier).toFixed(0);
+    return BigInt(baseUnits);
+  }
+
+  /**
+   * Helper: Convert base units to token amount with precision
+   */
+  private fromBaseUnits(baseUnits: number | bigint, decimals: number = 9): number {
+    const decimal = new Decimal(baseUnits.toString());
+    const divisor = new Decimal(10).pow(decimals);
+    return decimal.dividedBy(divisor).toNumber();
   }
 
   /**
