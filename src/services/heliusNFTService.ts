@@ -89,10 +89,24 @@ export class HeliusNFTService {
         
         const assets = data.result?.items || [];
         
+        // Log sample asset structure on first page for debugging
+        if (page === 1 && assets.length > 0) {
+          console.log('   🔍 Sample asset structure:', {
+            id: assets[0].id,
+            ownership: assets[0].ownership,
+            owner: assets[0].owner,
+            ownerAddress: assets[0].ownerAddress,
+            hasOwnership: !!assets[0].ownership,
+            hasOwner: !!assets[0].owner,
+            hasOwnerAddress: !!assets[0].ownerAddress,
+          });
+        }
+        
         if (assets.length === 0) {
           hasMore = false;
         } else {
           allAssets = allAssets.concat(assets);
+          console.log(`   📄 Page ${page}: Fetched ${assets.length} assets (total: ${allAssets.length})`);
           page++;
           
           // If we got less than 1000, we're done
@@ -104,14 +118,33 @@ export class HeliusNFTService {
       
       // Group by owner
       const holderMap = new Map<string, number>();
+      let skippedAssets = 0;
+      
       for (const asset of allAssets) {
-        const owner = asset.ownership?.owner;
+        // Try multiple ownership structures that Helius might return
+        const owner = asset.ownership?.owner || asset.owner || asset.ownerAddress;
+        
         if (owner) {
           holderMap.set(owner, (holderMap.get(owner) || 0) + 1);
+        } else {
+          skippedAssets++;
+          // Log first few skipped assets for debugging
+          if (skippedAssets <= 3) {
+            console.warn('   ⚠️ Skipped asset with missing owner:', {
+              id: asset.id,
+              ownership: asset.ownership,
+              owner: asset.owner,
+              ownerAddress: asset.ownerAddress,
+            });
+          }
         }
       }
 
-      console.log(`   Fetched ${allAssets.length} NFTs from collection (${holderMap.size} unique holders)`);
+      if (skippedAssets > 0) {
+        console.warn(`   ⚠️ Warning: Skipped ${skippedAssets} assets with missing ownership data`);
+      }
+
+      console.log(`   ✅ Fetched ${allAssets.length} NFTs from collection (${holderMap.size} unique holders, ${skippedAssets} skipped)`);
 
       // Convert to array
       return Array.from(holderMap.entries()).map(([wallet, nftCount]) => ({
@@ -135,36 +168,59 @@ export class HeliusNFTService {
     try {
       const url = `${this.baseUrl}/?api-key=${this.apiKey}`;
       
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          id: 'nft-by-owner',
-          method: 'getAssetsByOwner',
-          params: {
-            ownerAddress: wallet.toBase58(),
-            page: 1,
-            limit: 1000,
-          },
-        }),
-      });
+      // Fetch ALL pages of NFTs for this wallet
+      let page = 1;
+      let allNfts: any[] = [];
+      let hasMore = true;
 
-      if (!response.ok) {
-        throw new Error(`Helius API error: ${response.statusText}`);
+      while (hasMore) {
+        const response = await this.retryWithBackoff(async () => {
+          return await fetch(url, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              jsonrpc: '2.0',
+              id: `nft-by-owner-page-${page}`,
+              method: 'getAssetsByOwner',
+              params: {
+                ownerAddress: wallet.toBase58(),
+                page: page,
+                limit: 1000,
+              },
+            }),
+          });
+        }, 3, 2000);
+
+        if (!response.ok) {
+          throw new Error(`Helius API error: ${response.statusText}`);
+        }
+
+        const data: any = await response.json();
+        const nfts = data.result?.items || [];
+        
+        if (nfts.length === 0) {
+          hasMore = false;
+        } else {
+          allNfts = allNfts.concat(nfts);
+          page++;
+          
+          // If we got less than 1000, we're done
+          if (nfts.length < 1000) {
+            hasMore = false;
+          }
+        }
       }
 
-      const data: any = await response.json();
-      const nfts = data.result?.items || [];
+      console.log(`   📊 Fetched ${allNfts.length} total NFTs for wallet ${wallet.toBase58().substring(0, 8)}...`);
 
       // Count NFTs per collection
       const collectionCounts = new Map<string, number>();
       
       for (const collection of collections) {
         const collectionAddr = collection.toBase58();
-        const count = nfts.filter((nft: any) => {
+        const count = allNfts.filter((nft: any) => {
           return nft.grouping?.some((g: any) => 
             g.group_key === 'collection' && g.group_value === collectionAddr
           );
@@ -187,29 +243,53 @@ export class HeliusNFTService {
     try {
       const url = `${this.baseUrl}/?api-key=${this.apiKey}`;
       
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          id: 'nft-count',
-          method: 'getAssetsByOwner',
-          params: {
-            ownerAddress: wallet.toBase58(),
-            page: 1,
-            limit: 1000,
-          },
-        }),
-      });
+      // Fetch ALL pages of NFTs for this wallet
+      let page = 1;
+      let totalCount = 0;
+      let hasMore = true;
 
-      if (!response.ok) {
-        throw new Error(`Helius API error: ${response.statusText}`);
+      while (hasMore) {
+        const response = await this.retryWithBackoff(async () => {
+          return await fetch(url, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              jsonrpc: '2.0',
+              id: `nft-count-page-${page}`,
+              method: 'getAssetsByOwner',
+              params: {
+                ownerAddress: wallet.toBase58(),
+                page: page,
+                limit: 1000,
+              },
+            }),
+          });
+        }, 3, 2000);
+
+        if (!response.ok) {
+          throw new Error(`Helius API error: ${response.statusText}`);
+        }
+
+        const data: any = await response.json();
+        const nfts = data.result?.items || [];
+        
+        if (nfts.length === 0) {
+          hasMore = false;
+        } else {
+          totalCount += nfts.length;
+          page++;
+          
+          // If we got less than 1000, we're done
+          if (nfts.length < 1000) {
+            hasMore = false;
+          }
+        }
       }
 
-      const data: any = await response.json();
-      return (data.result?.items || []).length;
+      console.log(`   📊 Total NFT count for wallet ${wallet.toBase58().substring(0, 8)}...: ${totalCount}`);
+      return totalCount;
     } catch (error) {
       console.error('Failed to count all NFTs:', error);
       throw error;
