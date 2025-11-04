@@ -125,15 +125,16 @@ export class HeliusNFTService {
           allAssets = allAssets.concat(assets);
           console.log(`   📄 Page ${page}: Fetched ${assets.length} assets (total: ${allAssets.length}${total !== undefined ? `/${total}` : ''})`);
           
-          // Check if we've fetched all assets
-          if (total !== undefined && allAssets.length >= total) {
-            hasMore = false;
-            console.log(`   ✅ Fetched all ${total} assets`);
-          } else if (assets.length < 1000) {
+          // IMPORTANT: Don't trust the 'total' field - keep fetching until we get < 1000
+          // The API sometimes caps 'total' at 1000 even if there are more assets
+          if (assets.length < 1000) {
             // If we got less than 1000, we're on the last page
             hasMore = false;
+            console.log(`   ✅ Reached last page (got ${assets.length} < 1000)`);
           } else {
+            // Got exactly 1000, there might be more
             page++;
+            console.log(`   ➡️  Moving to page ${page} (got full page of 1000)`);
           }
         }
       }
