@@ -43,15 +43,24 @@ export class HeliusNFTService {
 
   /**
    * Get all holders of an NFT collection
+   * FIXED: Improved pagination logic with proper cursor handling and rate limiting
    */
   async getAllHolders(collectionAddress: PublicKey): Promise<Array<{ wallet: string; nftCount: number }>> {
     try {
       let page = 1;
       let allAssets: any[] = [];
       let hasMore = true;
+      const collectionAddr = collectionAddress.toBase58();
+      
+      console.log(`   🔍 Fetching holders for collection: ${collectionAddr}`);
 
       // Fetch all pages using Helius DAS API
       while (hasMore) {
+        // Add delay between requests to avoid rate limiting (except first page)
+        if (page > 1) {
+          await new Promise(resolve => setTimeout(resolve, 500)); // 500ms delay between pages
+        }
+
         const response = await this.retryWithBackoff(async () => {
           return await fetch(this.baseUrl, {
             method: 'POST',
@@ -64,13 +73,16 @@ export class HeliusNFTService {
               method: 'getAssetsByGroup',
               params: {
                 groupKey: 'collection',
-                groupValue: collectionAddress.toBase58(),
+                groupValue: collectionAddr,
                 page: page,
                 limit: 1000,
+                displayOptions: {
+                  showCollectionMetadata: false,
+                },
               },
             }),
           });
-        }, 3, 2000); // 3 retries, starting with 2 second delay
+        }, 5, 2000); // Increased to 5 retries for better reliability
 
         if (!response.ok) {
           const errorText = await response.text();
@@ -79,8 +91,6 @@ export class HeliusNFTService {
         }
 
         const data: any = await response.json();
-        // Don't log full response - too large for production logs
-        // console.log('Helius response:', JSON.stringify(data, null, 2));
         
         if (data.error) {
           console.error('Helius RPC error:', data.error);
@@ -88,6 +98,7 @@ export class HeliusNFTService {
         }
         
         const assets = data.result?.items || [];
+        const total = data.result?.total;
         
         // Log sample asset structure on first page for debugging
         if (page === 1 && assets.length > 0) {
@@ -100,31 +111,53 @@ export class HeliusNFTService {
             hasOwner: !!assets[0].owner,
             hasOwnerAddress: !!assets[0].ownerAddress,
           });
+          if (total !== undefined) {
+            console.log(`   📊 Total assets in collection: ${total}`);
+          }
         }
         
         if (assets.length === 0) {
           hasMore = false;
+          if (page === 1) {
+            console.warn(`   ⚠️  No assets found on first page for collection ${collectionAddr}`);
+          }
         } else {
           allAssets = allAssets.concat(assets);
-          console.log(`   📄 Page ${page}: Fetched ${assets.length} assets (total: ${allAssets.length})`);
-          page++;
+          console.log(`   📄 Page ${page}: Fetched ${assets.length} assets (total: ${allAssets.length}${total !== undefined ? `/${total}` : ''})`);
           
-          // If we got less than 1000, we're done
-          if (assets.length < 1000) {
+          // Check if we've fetched all assets
+          if (total !== undefined && allAssets.length >= total) {
             hasMore = false;
+            console.log(`   ✅ Fetched all ${total} assets`);
+          } else if (assets.length < 1000) {
+            // If we got less than 1000, we're on the last page
+            hasMore = false;
+          } else {
+            page++;
           }
         }
       }
       
-      // Group by owner
+      // Group by owner with improved ownership detection
       const holderMap = new Map<string, number>();
       let skippedAssets = 0;
+      let burnedAssets = 0;
+      const BURN_ADDRESSES = [
+        '1nc1nerator11111111111111111111111111111111',
+        '11111111111111111111111111111111',
+      ];
       
       for (const asset of allAssets) {
         // Try multiple ownership structures that Helius might return
         const owner = asset.ownership?.owner || asset.owner || asset.ownerAddress;
         
         if (owner) {
+          // Skip burned NFTs
+          if (BURN_ADDRESSES.includes(owner)) {
+            burnedAssets++;
+            continue;
+          }
+          
           holderMap.set(owner, (holderMap.get(owner) || 0) + 1);
         } else {
           skippedAssets++;
@@ -143,14 +176,20 @@ export class HeliusNFTService {
       if (skippedAssets > 0) {
         console.warn(`   ⚠️ Warning: Skipped ${skippedAssets} assets with missing ownership data`);
       }
+      
+      if (burnedAssets > 0) {
+        console.log(`   🔥 Filtered out ${burnedAssets} burned assets`);
+      }
 
-      console.log(`   ✅ Fetched ${allAssets.length} NFTs from collection (${holderMap.size} unique holders, ${skippedAssets} skipped)`);
+      console.log(`   ✅ Fetched ${allAssets.length} NFTs from collection (${holderMap.size} unique holders, ${skippedAssets} skipped, ${burnedAssets} burned)`);
 
-      // Convert to array
-      return Array.from(holderMap.entries()).map(([wallet, nftCount]) => ({
-        wallet,
-        nftCount,
-      }));
+      // Convert to array and sort by NFT count (descending) for consistency
+      return Array.from(holderMap.entries())
+        .map(([wallet, nftCount]) => ({
+          wallet,
+          nftCount,
+        }))
+        .sort((a, b) => b.nftCount - a.nftCount);
     } catch (error) {
       console.error('Failed to get holders from Helius:', error);
       throw error;
