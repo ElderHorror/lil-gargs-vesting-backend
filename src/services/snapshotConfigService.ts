@@ -136,17 +136,17 @@ export class SnapshotConfigService {
       }
     }
 
-    // Convert to allocation array and filter out amounts less than 1 token
+    // Convert to allocation array and filter out dust amounts (< 0.01 tokens)
     result.allocations = Array.from(walletAllocations.entries())
       .map(([address, data]) => ({
         address,
-        amount: Math.floor(data.total),
+        amount: data.total, // Keep fractional amounts
         sources: data.sources.map((s) => ({
           ...s,
-          amount: Math.floor(s.amount),
+          amount: s.amount, // Keep fractional amounts
         })),
       }))
-      .filter((allocation) => allocation.amount > 0); // Filter out zero/negative amounts
+      .filter((allocation) => allocation.amount >= 0.01); // Minimum 0.01 tokens to avoid dust
 
     result.totalWallets = result.allocations.length;
     result.totalAllocated = Math.floor(result.totalAllocated);
