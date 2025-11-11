@@ -22,7 +22,7 @@ export class TreasuryController {
 
   /**
    * GET /api/treasury/status
-   * Get treasury wallet status and allocation tracking
+   * Get treasury wallet status and allocation tracking with comprehensive metrics
    */
   async getTreasuryStatus(req: Request, res: Response) {
     try {
@@ -61,7 +61,7 @@ export class TreasuryController {
       
       try {
         const accountInfo = await getAccount(this.connection, treasuryTokenAccount);
-        // Convert from base units (lamports) to human-readable tokens
+        // Convert from base units to human-readable tokens
         treasuryBalance = Number(accountInfo.amount) / TOKEN_DIVISOR;
       } catch (err) {
         // Token account doesn't exist yet
@@ -77,12 +77,29 @@ export class TreasuryController {
 
       const totalAllocated = vestings?.reduce((sum: number, v: any) => sum + v.token_amount, 0) || 0;
 
-      // Get total claimed
+      // Get total claimed with proper decimal conversion (FIX: use claim_history table)
       const { data: claims } = await this.dbService.supabase
-        .from('claims')
-        .select('amount_claimed');
+        .from('claim_history')
+        .select('amount_claimed, claimed_at, transaction_signature, user_wallet')
+        .order('claimed_at', { ascending: false });
 
-      const totalClaimed = claims?.reduce((sum: number, c: any) => sum + Number(c.amount_claimed), 0) || 0;
+      const totalClaimedRaw = claims?.reduce((sum: number, c: any) => sum + Number(c.amount_claimed), 0) || 0;
+      // FIX: Divide by TOKEN_DIVISOR to convert from base units to human-readable tokens
+      const totalClaimed = totalClaimedRaw / TOKEN_DIVISOR;
+
+      // Calculate claim metrics
+      const claimCount = claims?.length || 0;
+      const averageClaimSize = claimCount > 0 ? totalClaimed / claimCount : 0;
+
+      // Get 10 most recent claims
+      const recentClaims = (claims || [])
+        .slice(0, 10)
+        .map((claim: any) => ({
+          amount: Number(claim.amount_claimed) / TOKEN_DIVISOR,
+          date: claim.claimed_at,
+          signature: claim.transaction_signature,
+          wallet: claim.user_wallet
+        }));
 
       // Calculate metrics
       const remainingNeeded = totalAllocated - totalClaimed;
@@ -119,6 +136,13 @@ export class TreasuryController {
 
       res.json({
         success: true,
+        data: {
+          currentBalance: treasuryBalance,
+          totalClaimed,
+          claimCount,
+          averageClaimSize: Math.round(averageClaimSize * 100) / 100,
+          recentClaims,
+        },
         treasury: {
           address: treasuryPublicKey.toBase58(),
           balance: treasuryBalance,
@@ -128,6 +152,11 @@ export class TreasuryController {
           totalAllocated,
           totalClaimed,
           remainingNeeded,
+        },
+        metrics: {
+          claimCount,
+          averageClaimSize: Math.round(averageClaimSize * 100) / 100,
+          recentClaims,
         },
         status: {
           health: status,
@@ -151,10 +180,13 @@ export class TreasuryController {
 
   /**
    * GET /api/treasury/pools
-   * Get treasury allocation breakdown by pool
+   * Get treasury allocation breakdown by pool with corrected queries
    */
   async getPoolBreakdown(req: Request, res: Response) {
     try {
+      const TOKEN_DECIMALS = 9;
+      const TOKEN_DIVISOR = Math.pow(10, TOKEN_DECIMALS);
+
       const { data: streams } = await this.dbService.supabase
         .from('vesting_streams')
         .select('*')
@@ -167,23 +199,26 @@ export class TreasuryController {
       const poolBreakdown = [];
 
       for (const stream of streams) {
-        // Get allocations for this pool
+        // Get allocations for this pool (FIX: use 'vestings' table, not 'vesting')
         const { data: vestings } = await this.dbService.supabase
-          .from('vesting')
-          .select('token_amount, user_wallet')
+          .from('vestings')
+          .select('id, token_amount, user_wallet')
           .eq('vesting_stream_id', stream.id)
           .eq('is_active', true);
 
         const totalAllocated = vestings?.reduce((sum: number, v: any) => sum + v.token_amount, 0) || 0;
         const userCount = vestings?.length || 0;
 
-        // Get claims for this pool
+        // Get claims for this pool (FIX: filter by vesting_id, not user_wallet)
+        const vestingIds = vestings?.map((v: any) => v.id) || [];
         const { data: claims } = await this.dbService.supabase
-          .from('claims')
+          .from('claim_history')
           .select('amount_claimed, vesting_id')
-          .in('vesting_id', vestings?.map((v: any) => v.user_wallet) || []);
+          .in('vesting_id', vestingIds);
 
-        const totalClaimed = claims?.reduce((sum: number, c: any) => sum + Number(c.amount_claimed), 0) || 0;
+        const totalClaimedRaw = claims?.reduce((sum: number, c: any) => sum + Number(c.amount_claimed), 0) || 0;
+        // FIX: Divide by TOKEN_DIVISOR to convert from base units
+        const totalClaimed = totalClaimedRaw / TOKEN_DIVISOR;
 
         poolBreakdown.push({
           id: stream.id,

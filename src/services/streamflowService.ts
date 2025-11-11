@@ -123,16 +123,30 @@ export class StreamflowService {
         if (stream) {
           const now = Math.floor(Date.now() / 1000);
           const end = Number(stream.end);
+          const withdrawnAmount = getNumberFromBN(stream.withdrawnAmount, 9);
+          const depositedAmount = getNumberFromBN(stream.depositedAmount, 9);
+          const remainingAmount = depositedAmount - withdrawnAmount;
           
-          // If stream is completed, withdraw first
-          if (now >= end) {
-            console.log('Stream is completed, withdrawing all tokens first...');
-            await this.withdrawFromPool(streamId, adminKeypair);
-            withdrew = true;
+          // If stream is completed and has remaining tokens, withdraw first
+          if (now >= end && remainingAmount > 0) {
+            console.log(`Stream is completed with ${remainingAmount} tokens remaining, withdrawing first...`);
+            try {
+              await this.withdrawFromPool(streamId, adminKeypair);
+              withdrew = true;
+            } catch (withdrawErr: any) {
+              // If withdrawal fails due to AccountNotInitialized, tokens are already withdrawn
+              if (withdrawErr.message?.includes('AccountNotInitialized') || withdrawErr.message?.includes('3012')) {
+                console.log('Tokens already withdrawn, proceeding with cancellation...');
+              } else {
+                throw withdrawErr;
+              }
+            }
+          } else if (now >= end) {
+            console.log('Stream is completed and all tokens already withdrawn');
           }
         }
-      } catch (err) {
-        console.log('Could not check stream status, proceeding with cancel:', err);
+      } catch (err: any) {
+        console.log('Could not check stream status, proceeding with cancel:', err.message || err);
       }
       
       const cancelResult = await this.client.cancel(
@@ -147,7 +161,15 @@ export class StreamflowService {
         signature: cancelResult.txId,
         withdrew,
       };
-    } catch (error) {
+    } catch (error: any) {
+      // If cancellation fails due to AccountNotInitialized, stream is already closed
+      if (error.message?.includes('AccountNotInitialized') || error.message?.includes('3012')) {
+        console.log('Stream is already closed - rent was already reclaimed');
+        return {
+          signature: 'already_closed',
+          withdrew: false,
+        };
+      }
       console.error('Failed to cancel Streamflow pool:', error);
       throw error;
     }
